@@ -7,7 +7,7 @@ use std::time::Duration;
 
 #[derive(Deserialize)]
 struct Conf {
-    plans: Option<Vec<Plan>>,
+    blueprints: Option<Vec<Blueprint>>,
     env: Vec<(String, String)>,
 }
 
@@ -22,7 +22,7 @@ struct Image {
 }
 
 #[derive(Deserialize)]
-struct Plan {
+struct Blueprint {
     name: String,
     env: Option<Vec<(String, String)>>,
     image: Option<Image>,
@@ -37,7 +37,7 @@ fn main() {
         .unwrap();
     check_package_dependencies(vec!["psql", "sqlx"]);
 
-    if let Some(plans) = conf.plans {
+    if let Some(plans) = conf.blueprints {
         // TODO: Change this ==================================================
         if let Some(db_plan) = plans.iter().find(|p| p.name.eq("db")) {
             if let Some(env) = &db_plan.env {
