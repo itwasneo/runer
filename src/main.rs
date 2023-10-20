@@ -165,6 +165,10 @@ fn wait_for_postgres_to_get_ready(user: &str, password: &str, host: &str, port: 
     }
 }
 
+/// Creates a new docker image(if it doesn't exist) according to given Image.
+///
+/// ---
+/// Panics if <docker build> command returns non-success code.
 fn create_docker_image(docker_image: &Image) {
     println!("Creating docker image for {}", docker_image.tag);
     if let Some(pre) = &docker_image.pre {
@@ -180,9 +184,7 @@ fn create_docker_image(docker_image: &Image) {
         });
     }
 
-    // TODO: implement <docker build> command
     let mut docker_build_command = Command::new("docker");
-
     docker_build_command.arg("build");
 
     if let Some(cmd_options) = &docker_image.options {
@@ -223,6 +225,11 @@ fn create_docker_image(docker_image: &Image) {
     }
 }
 
+/// Runs a new docker container according to the given Container.
+///
+/// ---
+/// Panics if an empty <entrypoint> command token array is provided.
+/// Panics if <docker run> command returns non-success code.
 fn run_docker_container(docker_container: &Container) {
     let mut docker_run_command = Command::new("docker");
     docker_run_command.arg("run");
@@ -268,12 +275,24 @@ fn run_docker_container(docker_container: &Container) {
         .output()
         .expect("Failed to execute docker build command.");
     if !result.status.success() {
+        // TODO: In this case gracfully shutdown instead of panic.
         panic!("RESULT: {:?}", result)
     }
 
     println!("Running container: {}", docker_container.name);
 }
 
+/// Creates a Command list from the given list of (ExecutionEnvironment, Vec<String>)
+/// tuples.
+///
+/// It uses the first element of the Vec as the <command>, the rest is evaluated
+/// as <args>.
+///
+/// Depending on the given ExecutionEnvironment, it can modify the <command> to
+/// be run in the given container.
+///
+/// ---
+/// Panics if the given Vec<String> is empty.
 fn create_commands_from_tokens<'a>(
     env_and_tokens: &Vec<(ExecutionEnvironment, Vec<String>)>,
 ) -> Vec<Command> {
@@ -300,6 +319,10 @@ fn create_commands_from_tokens<'a>(
         .collect()
 }
 
+/// Sets the given (String, String) tuples as environment variables inside the
+/// **execution** environment.
+///
+/// First element gets used as KEY. Second element gets used as VALUE.
 fn set_environment_variables(key_values: Vec<(String, String)>) {
     key_values.iter().for_each(|p| {
         std::env::set_var(&p.0, &p.1);
