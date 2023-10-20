@@ -1,8 +1,6 @@
 use config::{Config, File, FileFormat};
 use serde::Deserialize;
 use std::process::Command;
-use std::thread::sleep;
-use std::time::Duration;
 
 #[derive(Deserialize)]
 struct Conf {
@@ -34,12 +32,20 @@ struct Container {
     env: Option<Vec<(String, String)>>,
     volumes: Option<Vec<(String, String)>>,
     entrypoint: Option<Vec<String>>,
+    hc: Option<HealthCheck>,
+}
+
+#[derive(Deserialize)]
+struct HealthCheck {
+    cmd: (ExecutionEnvironment, String),
+    interval: Option<String>,
+    retries: Option<u32>,
 }
 
 #[derive(Deserialize)]
 struct Blueprint {
     name: String,
-    env: Option<Vec<(String, String)>>,
+    _env: Option<Vec<(String, String)>>,
     image: Option<Image>,
     container: Option<Container>,
 }
@@ -58,37 +64,6 @@ fn main() {
         if let Some(db) = plans.iter().find(|p| p.name.eq("db")) {
             if let Some(container) = &db.container {
                 run_docker_container(container);
-            }
-        }
-
-        if let Some(db_plan) = plans.iter().find(|p| p.name.eq("db")) {
-            if let Some(env) = &db_plan.env {
-                let user = env
-                    .iter()
-                    .find(|p| p.0.eq("POSTGRES_USER"))
-                    .and_then(|p| Some(&p.1))
-                    .unwrap_or_else(|| panic!("<user> env variable is needed."));
-                let password = env
-                    .iter()
-                    .find(|p| p.0.eq("POSTGRES_PASSWORD"))
-                    .and_then(|p| Some(&p.1))
-                    .unwrap_or_else(|| panic!("<password> env variable is needed."));
-                let name = env
-                    .iter()
-                    .find(|p| p.0.eq("POSTGRES_DB"))
-                    .and_then(|p| Some(&p.1))
-                    .unwrap_or_else(|| panic!("<name> env variable is needed."));
-                let host = env
-                    .iter()
-                    .find(|p| p.0.eq("POSTGRES_HOST"))
-                    .and_then(|p| Some(&p.1))
-                    .unwrap_or_else(|| panic!("<host> env variable is needed."));
-                let port = env
-                    .iter()
-                    .find(|p| p.0.eq("POSTGRES_PORT"))
-                    .and_then(|p| Some(&p.1))
-                    .unwrap_or_else(|| panic!("<port> env variable is needed."));
-                wait_for_postgres_to_get_ready(user, password, host, port, name);
             }
         }
         // ====================================================================
@@ -136,33 +111,6 @@ fn check_package_dependencies(deps: Vec<&str>) {
             panic!("{} is not installed", d);
         }
     });
-}
-
-/// Postgres Connection Readiness Check:
-/// Checks whether the Postgres instance ready for operation. It runs a simple
-/// <psql> command for checking. Retries the command every second if it fails.
-fn wait_for_postgres_to_get_ready(user: &str, password: &str, host: &str, port: &str, name: &str) {
-    let connection_string = format!(
-        "postgres://{user}:{password}@{host}:{port}/{name}",
-        user = user,
-        password = password,
-        host = host,
-        port = port,
-        name = name
-    );
-    let mut check = Command::new("psql");
-    check.arg(&connection_string).args(["-c", "\\q"]);
-
-    while !check
-        .output()
-        .map_err(|_| eprintln!("Failed to execute <psql>"))
-        .unwrap()
-        .status
-        .success()
-    {
-        eprintln!("DB is not ready");
-        sleep(Duration::from_secs(1));
-    }
 }
 
 /// Creates a new docker image(if it doesn't exist) according to given Image.
@@ -229,6 +177,7 @@ fn create_docker_image(docker_image: &Image) {
 ///
 /// ---
 /// Panics if an empty <entrypoint> command token array is provided.
+/// Panics if an empty <healthcheck> command token array is provided.
 /// Panics if <docker run> command returns non-success code.
 fn run_docker_container(docker_container: &Container) {
     let mut docker_run_command = Command::new("docker");
@@ -263,6 +212,28 @@ fn run_docker_container(docker_container: &Container) {
             })
         } else {
             panic!("Missing entrypoint command/arguments.");
+        }
+    }
+
+    if let Some(hc) = &docker_container.hc {
+        if !hc.cmd.1.is_empty() {
+            match &hc.cmd.0 {
+                ExecutionEnvironment::Local => {
+                    docker_run_command.args(["--health-cmd", &hc.cmd.1]);
+                }
+                ExecutionEnvironment::Container(_container_identification) => {
+                    todo!("Implement command execution in Container")
+                }
+            }
+        } else {
+            panic!("Missing healthcheck command/arguments.")
+        }
+
+        if let Some(interval) = &hc.interval {
+            docker_run_command.args(["--health-interval", interval]);
+        }
+        if let Some(retries) = hc.retries {
+            docker_run_command.args(["--health-retries", &retries.to_string()]);
         }
     }
 
