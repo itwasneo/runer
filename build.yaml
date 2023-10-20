@@ -1,0 +1,24 @@
+api:
+    env:
+        host: 127.0.0.1
+        port: 8081
+        db_pool_max_connections: 20
+    image:
+        context: /home/itwasneo/git/last/api
+        tag: itwasneo/last-api:latest
+        options:
+            - "--rm"
+        pre:
+            - ["cargo", "sqlx", "prepare", "--check"]
+        post:
+            - ["echo", "itwasneo/api:latest is READY"]
+
+db:
+    user: postgres
+    password: password
+    name: last
+    host: 127.0.0.1
+    port: 5432
+
+env:
+    - ["DATABASE_URL", "postgres://postgres:password@localhost:5432/last"]
