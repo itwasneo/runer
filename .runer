@@ -1,9 +1,10 @@
-plans:
+blueprints:
   - name: api
-    env:
-        - ["host", "127.0.0.1"]
-        - ["port", "8081"]
-        - ["db_pool_max_connections", "20"]
+    env: &api_env
+        - ["API_HOST", "127.0.0.1"]
+        - ["API_PORT", "8081"]
+        - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
+        - ["DB_POOL_MAX_CONNECTIONS", "20"]
     image:
         context: /home/itwasneo/git/last/api
         tag: itwasneo/last-api:latest
@@ -13,6 +14,11 @@ plans:
             - ["cargo", "sqlx", "prepare", "--check"]
         post:
             - ["echo", "itwasneo/api:latest is READY"]
+    container:
+        name: last-api
+        image: itwasneo/last-api:latest
+        ports: ["8081", "8081"]
+        env: *api_env
   - name: db
     env:
         - ["user", "postgres"]

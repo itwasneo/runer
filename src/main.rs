@@ -1,6 +1,5 @@
 use config::{Config, File, FileFormat};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
@@ -14,7 +13,7 @@ struct Conf {
 #[derive(Deserialize)]
 struct Image {
     context: String,
-    tag: Option<String>,
+    tag: String,
     options: Option<Vec<String>>,
     build_args: Option<Vec<String>>,
     pre: Option<Vec<Vec<String>>>,
@@ -22,10 +21,19 @@ struct Image {
 }
 
 #[derive(Deserialize)]
+struct Container {
+    name: String,
+    image: String,
+    ports: (String, String),
+    env: Option<Vec<(String, String)>>,
+}
+
+#[derive(Deserialize)]
 struct Blueprint {
     name: String,
     env: Option<Vec<(String, String)>>,
     image: Option<Image>,
+    container: Option<Container>,
 }
 
 fn main() {
@@ -76,14 +84,11 @@ fn main() {
         // TODO: Change this ==================================================
         if let Some(api) = plans.iter().find(|p| p.name.eq("api")) {
             if let Some(image) = &api.image {
-                create_docker_image(DockerBuild {
-                    context: &PathBuf::from(&image.context),
-                    image_tag: &image.tag,
-                    cmd_options: &image.options,
-                    build_args: &image.build_args,
-                    pre: &image.pre,
-                    post: &image.post,
-                });
+                create_docker_image(image);
+            }
+
+            if let Some(container) = &api.container {
+                run_docker_container(container);
             }
         }
         // ====================================================================
@@ -136,21 +141,13 @@ fn wait_for_postgres_to_get_ready(user: &str, password: &str, host: &str, port: 
     }
 }
 
-struct DockerBuild<'a> {
-    context: &'a Path,
-    image_tag: &'a Option<String>,
-    cmd_options: &'a Option<Vec<String>>,
-    build_args: &'a Option<Vec<String>>,
-    pre: &'a Option<Vec<Vec<String>>>,
-    post: &'a Option<Vec<Vec<String>>>,
-}
-
-fn create_docker_image(docker_build: DockerBuild) {
-    if let Some(pre) = docker_build.pre {
-        let mut cmds = create_commands_from_tokens(pre);
+fn create_docker_image(docker_image: &Image) {
+    println!("Creating docker image for {}", docker_image.tag);
+    if let Some(pre) = &docker_image.pre {
+        let mut cmds = create_commands_from_tokens(&pre);
         cmds.iter_mut().for_each(|cmd| {
             let result = cmd
-                .current_dir(docker_build.context)
+                .current_dir(&docker_image.context)
                 .output()
                 .expect("Failed to execute command");
             if !result.status.success() {
@@ -164,23 +161,21 @@ fn create_docker_image(docker_build: DockerBuild) {
 
     docker_build_command.arg("build");
 
-    if let Some(cmd_options) = docker_build.cmd_options {
+    if let Some(cmd_options) = &docker_image.options {
         cmd_options.iter().for_each(|cmd_option| {
             docker_build_command.arg(cmd_option);
         })
     }
 
-    if let Some(image_tag) = docker_build.image_tag {
-        docker_build_command.args(["-t", &image_tag]);
-    }
+    docker_build_command.args(["-t", &docker_image.tag]);
 
-    if let Some(build_args) = docker_build.build_args {
+    if let Some(build_args) = &docker_image.build_args {
         build_args.iter().for_each(|build_arg| {
             docker_build_command.arg(format!("--build-arg=\"{}\"", build_arg));
         });
     }
 
-    docker_build_command.arg(docker_build.context);
+    docker_build_command.arg(&docker_image.context);
 
     let result = docker_build_command
         .output()
@@ -188,12 +183,13 @@ fn create_docker_image(docker_build: DockerBuild) {
     if !result.status.success() {
         panic!("RESULT: {:?}", result)
     }
+    println!("Docker image is created for {}", docker_image.tag);
 
-    if let Some(post) = docker_build.post {
-        let mut cmds = create_commands_from_tokens(post);
+    if let Some(post) = &docker_image.post {
+        let mut cmds = create_commands_from_tokens(&post);
         cmds.iter_mut().for_each(|cmd| {
             let result = cmd
-                .current_dir(docker_build.context)
+                .current_dir(&docker_image.context)
                 .output()
                 .expect("Failed to execute command");
             if !result.status.success() {
@@ -201,6 +197,41 @@ fn create_docker_image(docker_build: DockerBuild) {
             }
         });
     }
+}
+
+fn run_docker_container(docker_container: &Container) {
+    let mut docker_run_command = Command::new("docker");
+    docker_run_command.arg("run");
+
+    docker_run_command.arg("-d");
+
+    docker_run_command.args(["--name", &docker_container.name]);
+
+    if let Some(env) = &docker_container.env {
+        env.iter().for_each(|p| {
+            // docker_run_command.arg(format!("--env {}={}", p.0, p.1));
+            docker_run_command.args(["--env", &format!("{}={}", p.0, p.1)]);
+        })
+    }
+
+    docker_run_command.args([
+        "-p",
+        &format!("{}:{}", docker_container.ports.0, docker_container.ports.1),
+    ]);
+
+    // TODO: Change this
+    docker_run_command.arg("--net=last_default");
+
+    docker_run_command.arg(&docker_container.image);
+
+    let result = docker_run_command
+        .output()
+        .expect("Failed to execute docker build command.");
+    if !result.status.success() {
+        panic!("RESULT: {:?}", result)
+    }
+
+    println!("Running container: {}", docker_container.name);
 }
 
 fn create_commands_from_tokens<'a>(tokens_vec: &Vec<Vec<String>>) -> Vec<Command> {
