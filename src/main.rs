@@ -16,16 +16,24 @@ struct Image {
     tag: String,
     options: Option<Vec<String>>,
     build_args: Option<Vec<String>>,
-    pre: Option<Vec<Vec<String>>>,
-    post: Option<Vec<Vec<String>>>,
+    pre: Option<Vec<(ExecutionEnvironment, Vec<String>)>>,
+    post: Option<Vec<(ExecutionEnvironment, Vec<String>)>>,
+}
+
+#[derive(Deserialize)]
+enum ExecutionEnvironment {
+    Local,
+    Container(String),
 }
 
 #[derive(Deserialize)]
 struct Container {
     name: String,
     image: String,
-    ports: (String, String),
+    ports: Option<(String, String)>,
     env: Option<Vec<(String, String)>>,
+    volumes: Option<Vec<(String, String)>>,
+    entrypoint: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -47,31 +55,37 @@ fn main() {
 
     if let Some(plans) = conf.blueprints {
         // TODO: Change this ==================================================
+        if let Some(db) = plans.iter().find(|p| p.name.eq("db")) {
+            if let Some(container) = &db.container {
+                run_docker_container(container);
+            }
+        }
+
         if let Some(db_plan) = plans.iter().find(|p| p.name.eq("db")) {
             if let Some(env) = &db_plan.env {
                 let user = env
                     .iter()
-                    .find(|p| p.0.eq("user"))
+                    .find(|p| p.0.eq("POSTGRES_USER"))
                     .and_then(|p| Some(&p.1))
                     .unwrap_or_else(|| panic!("<user> env variable is needed."));
                 let password = env
                     .iter()
-                    .find(|p| p.0.eq("password"))
+                    .find(|p| p.0.eq("POSTGRES_PASSWORD"))
                     .and_then(|p| Some(&p.1))
                     .unwrap_or_else(|| panic!("<password> env variable is needed."));
                 let name = env
                     .iter()
-                    .find(|p| p.0.eq("name"))
+                    .find(|p| p.0.eq("POSTGRES_DB"))
                     .and_then(|p| Some(&p.1))
                     .unwrap_or_else(|| panic!("<name> env variable is needed."));
                 let host = env
                     .iter()
-                    .find(|p| p.0.eq("host"))
+                    .find(|p| p.0.eq("POSTGRES_HOST"))
                     .and_then(|p| Some(&p.1))
                     .unwrap_or_else(|| panic!("<host> env variable is needed."));
                 let port = env
                     .iter()
-                    .find(|p| p.0.eq("port"))
+                    .find(|p| p.0.eq("POSTGRES_PORT"))
                     .and_then(|p| Some(&p.1))
                     .unwrap_or_else(|| panic!("<port> env variable is needed."));
                 wait_for_postgres_to_get_ready(user, password, host, port, name);
@@ -88,6 +102,16 @@ fn main() {
             }
 
             if let Some(container) = &api.container {
+                run_docker_container(container);
+            }
+        }
+
+        if let Some(crawler) = plans.iter().find(|p| p.name.eq("crawler")) {
+            if let Some(image) = &crawler.image {
+                create_docker_image(image);
+            }
+
+            if let Some(container) = &crawler.container {
                 run_docker_container(container);
             }
         }
@@ -144,7 +168,7 @@ fn wait_for_postgres_to_get_ready(user: &str, password: &str, host: &str, port: 
 fn create_docker_image(docker_image: &Image) {
     println!("Creating docker image for {}", docker_image.tag);
     if let Some(pre) = &docker_image.pre {
-        let mut cmds = create_commands_from_tokens(&pre);
+        let mut cmds = create_commands_from_tokens(pre);
         cmds.iter_mut().for_each(|cmd| {
             let result = cmd
                 .current_dir(&docker_image.context)
@@ -214,10 +238,26 @@ fn run_docker_container(docker_container: &Container) {
         })
     }
 
-    docker_run_command.args([
-        "-p",
-        &format!("{}:{}", docker_container.ports.0, docker_container.ports.1),
-    ]);
+    if let Some(ports) = &docker_container.ports {
+        docker_run_command.args(["-p", &format!("{}:{}", ports.0, ports.1)]);
+    }
+
+    if let Some(volumes) = &docker_container.volumes {
+        volumes.iter().for_each(|v| {
+            docker_run_command.args(["-v", &format!("{}:{}", v.0, v.1)]);
+        })
+    }
+
+    if let Some(entrypoint) = &docker_container.entrypoint {
+        if !entrypoint.is_empty() {
+            docker_run_command.args(["--entrypoint", &entrypoint[0]]);
+            entrypoint[1..].iter().for_each(|t| {
+                docker_run_command.arg(&t);
+            })
+        } else {
+            panic!("Missing entrypoint command/arguments.");
+        }
+    }
 
     // TODO: Change this
     docker_run_command.arg("--net=last_default");
@@ -234,16 +274,25 @@ fn run_docker_container(docker_container: &Container) {
     println!("Running container: {}", docker_container.name);
 }
 
-fn create_commands_from_tokens<'a>(tokens_vec: &Vec<Vec<String>>) -> Vec<Command> {
-    tokens_vec
+fn create_commands_from_tokens<'a>(
+    env_and_tokens: &Vec<(ExecutionEnvironment, Vec<String>)>,
+) -> Vec<Command> {
+    env_and_tokens
         .iter()
-        .map(|tokens| {
-            if !tokens.is_empty() {
-                let mut cmd = Command::new(&tokens[0]);
-                tokens[1..].iter().for_each(|token| {
-                    cmd.arg(token);
-                });
-                return cmd;
+        .map(|e_ts| {
+            if !e_ts.1.is_empty() {
+                match &e_ts.0 {
+                    ExecutionEnvironment::Local => {
+                        let mut cmd = Command::new(&e_ts.1[0]);
+                        e_ts.1[1..].iter().for_each(|token| {
+                            cmd.arg(token);
+                        });
+                        return cmd;
+                    }
+                    ExecutionEnvironment::Container(_container_identification) => {
+                        todo!("Implement command execution in Container")
+                    }
+                }
             } else {
                 panic!("Empty command tokens array is not allowed.")
             }

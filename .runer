@@ -1,4 +1,5 @@
 blueprints:
+    # last-api
   - name: api
     env: &api_env
         - ["API_HOST", "127.0.0.1"]
@@ -11,20 +12,49 @@ blueprints:
         options:
             - "--rm"
         pre:
-            - ["cargo", "sqlx", "prepare", "--check"]
-        post:
-            - ["echo", "itwasneo/api:latest is READY"]
+            - [Local,["cargo", "sqlx", "prepare", "--check"]]
     container:
         name: last-api
         image: itwasneo/last-api:latest
         ports: ["8081", "8081"]
         env: *api_env
+
+    # last-crawler
+  - name: crawler
+    env: &crawler_env
+        - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
+        - ["DB_POOL_MAX_CONNECTIONS", "20"]
+    image:
+        context: /home/itwasneo/git/last/crawler
+        tag: itwasneo/last-crawler:latest
+        options:
+            - "--rm"
+        pre:
+            - [Local,["cargo", "sqlx", "prepare", "--check"]]
+    container:
+        name: last-crawler
+        image: itwasneo/last-crawler:latest
+        env: *crawler_env
+
+    # postgres
   - name: db
-    env:
-        - ["user", "postgres"]
-        - ["password", "password"]
-        - ["name", "last"]
-        - ["host", "127.0.0.1"]
-        - ["port", "5432"]
+    container:
+        name: postgres
+        image: postgres
+        options:
+            - "--restart=always"
+        ports: ["5432", "5432"]
+        env: 
+        - &user ["POSTGRES_USER", "postgres"]
+        - &password ["POSTGRES_PASSWORD", "password"]
+        - &db ["POSTGRES_DB", "last"]
+        volumes:
+            - ["pg_data", "/var/lib/postgresql/data"]
+    env: 
+        - *user
+        - *password
+        - *db
+        - ["POSTGRES_HOST", "127.0.0.1"]
+        - ["POSTGRES_PORT", "5432"]
 env:
     - ["DATABASE_URL", "postgres://postgres:password@localhost:5432/last"]
