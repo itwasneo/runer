@@ -30,7 +30,7 @@ struct Plan {
 
 fn main() {
     let conf: Conf = Config::builder()
-        .add_source(File::new("build.yaml", FileFormat::Yaml))
+        .add_source(File::new(".runer", FileFormat::Yaml))
         .build()
         .unwrap()
         .try_deserialize::<Conf>()
