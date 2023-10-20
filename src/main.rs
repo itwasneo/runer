@@ -7,22 +7,8 @@ use std::time::Duration;
 
 #[derive(Deserialize)]
 struct Conf {
-    api: Api,
-    db: Db,
+    plans: Option<Vec<Plan>>,
     env: Vec<(String, String)>,
-}
-
-#[derive(Deserialize)]
-struct Api {
-    env: ApiEnv,
-    image: Image,
-}
-
-#[derive(Deserialize)]
-struct ApiEnv {
-    host: String,
-    port: u32,
-    db_pool_max_connections: u32,
 }
 
 #[derive(Deserialize)]
@@ -36,12 +22,10 @@ struct Image {
 }
 
 #[derive(Deserialize)]
-struct Db {
-    user: String,
-    password: String,
+struct Plan {
     name: String,
-    host: String,
-    port: u32,
+    env: Option<Vec<(String, String)>>,
+    image: Option<Image>,
 }
 
 fn main() {
@@ -52,16 +36,58 @@ fn main() {
         .try_deserialize::<Conf>()
         .unwrap();
     check_package_dependencies(vec!["psql", "sqlx"]);
-    wait_for_postgres_to_get_ready(&conf.db);
-    set_environment_variables(conf.env);
-    create_docker_image(DockerBuild {
-        context: &PathBuf::from(conf.api.image.context),
-        image_tag: conf.api.image.tag,
-        cmd_options: conf.api.image.options,
-        build_args: conf.api.image.build_args,
-        pre: conf.api.image.pre,
-        post: conf.api.image.post,
-    });
+
+    if let Some(plans) = conf.plans {
+        // TODO: Change this ==================================================
+        if let Some(db_plan) = plans.iter().find(|p| p.name.eq("db")) {
+            if let Some(env) = &db_plan.env {
+                let user = env
+                    .iter()
+                    .find(|p| p.0.eq("user"))
+                    .and_then(|p| Some(&p.1))
+                    .unwrap_or_else(|| panic!("<user> env variable is needed."));
+                let password = env
+                    .iter()
+                    .find(|p| p.0.eq("password"))
+                    .and_then(|p| Some(&p.1))
+                    .unwrap_or_else(|| panic!("<password> env variable is needed."));
+                let name = env
+                    .iter()
+                    .find(|p| p.0.eq("name"))
+                    .and_then(|p| Some(&p.1))
+                    .unwrap_or_else(|| panic!("<name> env variable is needed."));
+                let host = env
+                    .iter()
+                    .find(|p| p.0.eq("host"))
+                    .and_then(|p| Some(&p.1))
+                    .unwrap_or_else(|| panic!("<host> env variable is needed."));
+                let port = env
+                    .iter()
+                    .find(|p| p.0.eq("port"))
+                    .and_then(|p| Some(&p.1))
+                    .unwrap_or_else(|| panic!("<port> env variable is needed."));
+                wait_for_postgres_to_get_ready(user, password, host, port, name);
+            }
+        }
+        // ====================================================================
+
+        set_environment_variables(conf.env);
+
+        // TODO: Change this ==================================================
+        if let Some(api) = plans.iter().find(|p| p.name.eq("api")) {
+            if let Some(image) = &api.image {
+                create_docker_image(DockerBuild {
+                    context: &PathBuf::from(&image.context),
+                    image_tag: &image.tag,
+                    cmd_options: &image.options,
+                    build_args: &image.build_args,
+                    pre: &image.pre,
+                    post: &image.post,
+                });
+            }
+        }
+        // ====================================================================
+    }
 }
 
 /// Package Dependency Check:
@@ -86,14 +112,14 @@ fn check_package_dependencies(deps: Vec<&str>) {
 /// Postgres Connection Readiness Check:
 /// Checks whether the Postgres instance ready for operation. It runs a simple
 /// <psql> command for checking. Retries the command every second if it fails.
-fn wait_for_postgres_to_get_ready(db_conf: &Db) {
+fn wait_for_postgres_to_get_ready(user: &str, password: &str, host: &str, port: &str, name: &str) {
     let connection_string = format!(
         "postgres://{user}:{password}@{host}:{port}/{name}",
-        user = db_conf.user,
-        password = db_conf.password,
-        host = db_conf.host,
-        port = db_conf.port,
-        name = db_conf.name
+        user = user,
+        password = password,
+        host = host,
+        port = port,
+        name = name
     );
     let mut check = Command::new("psql");
     check.arg(&connection_string).args(["-c", "\\q"]);
@@ -112,11 +138,11 @@ fn wait_for_postgres_to_get_ready(db_conf: &Db) {
 
 struct DockerBuild<'a> {
     context: &'a Path,
-    image_tag: Option<String>,
-    cmd_options: Option<Vec<String>>,
-    build_args: Option<Vec<String>>,
-    pre: Option<Vec<Vec<String>>>,
-    post: Option<Vec<Vec<String>>>,
+    image_tag: &'a Option<String>,
+    cmd_options: &'a Option<Vec<String>>,
+    build_args: &'a Option<Vec<String>>,
+    pre: &'a Option<Vec<Vec<String>>>,
+    post: &'a Option<Vec<Vec<String>>>,
 }
 
 fn create_docker_image(docker_build: DockerBuild) {
@@ -177,7 +203,7 @@ fn create_docker_image(docker_build: DockerBuild) {
     }
 }
 
-fn create_commands_from_tokens<'a>(tokens_vec: Vec<Vec<String>>) -> Vec<Command> {
+fn create_commands_from_tokens<'a>(tokens_vec: &Vec<Vec<String>>) -> Vec<Command> {
     tokens_vec
         .iter()
         .map(|tokens| {
