@@ -1,67 +1,68 @@
 blueprints:
     # last-api
-  - name: api
-    image:
-        context: /home/itwasneo/git/last/api
-        tag: itwasneo/last-api:latest
-        options:
-            - "--rm"
-        pre:
-            - [Local,["cargo", "sqlx", "prepare", "--check"]]
-    container:
-        name: last-api
-        image: itwasneo/last-api:latest
-        ports: ["8081", "8081"]
-        env: 
-            - ["API_HOST", "127.0.0.1"]
-            - ["API_PORT", "8081"]
-            - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
-            - ["DB_POOL_MAX_CONNECTIONS", "20"]
+    api:
+        image:
+            context: /home/itwasneo/git/last/api
+            tag: itwasneo/last-api:latest
+            options:
+                - "--rm"
+            pre:
+                - [Local,["cargo", "sqlx", "prepare", "--check"]]
+        container:
+            name: last-api
+            image: itwasneo/last-api:latest
+            ports: ["8081", "8081"]
+            env: 
+                - ["API_HOST", "127.0.0.1"]
+                - ["API_PORT", "8081"]
+                - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
+                - ["DB_POOL_MAX_CONNECTIONS", "20"]
 
     # last-crawler
-  - name: crawler
-    image:
-        context: /home/itwasneo/git/last/crawler
-        tag: itwasneo/last-crawler:latest
-        options:
-            - "--rm"
-        pre:
-            - [Local,["cargo", "sqlx", "prepare", "--check"]]
-    container:
-        name: last-crawler
-        image: itwasneo/last-crawler:latest
-        env: 
-            - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
-            - ["DB_POOL_MAX_CONNECTIONS", "20"]
+    crawler:
+        image:
+            context: /home/itwasneo/git/last/crawler
+            tag: itwasneo/last-crawler:latest
+            options:
+                - "--rm"
+            pre:
+                - [Local,["cargo", "sqlx", "prepare", "--check"]]
+        container:
+            name: last-crawler
+            image: itwasneo/last-crawler:latest
+            env: 
+                - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
+                - ["DB_POOL_MAX_CONNECTIONS", "20"]
 
     # postgres
-  - name: db
-    container:
-        name: postgres
-        image: postgres
-        options:
-            - "--restart=always"
-        ports: ["5432", "5432"]
-        env: 
-        - &user ["POSTGRES_USER", "postgres"]
-        - &password ["POSTGRES_PASSWORD", "password"]
-        - &db ["POSTGRES_DB", "last"]
-        volumes:
-            - ["pg_data", "/var/lib/postgresql/data"]
-        hc:
-            cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
-            interval: "30s"
-            retries: 5
-# flows:
-#     - name: local_dev_docker_setup
-#     - tasks:
-#         - { id: 0, type: blueprint, name: db, job: container }
-#         - { id: 1, type: blueprint, name: db, job: health_check, depends: 0 }
-#         - { id: 2, type: env, name: dev, job: Set, depends: 1 }
-#         - { id: 3, type: blueprint, name: api, job: image, depends: 1 }
-#         - { id: 4, type: blueprint, name: api, job: container, depends: 3 }
-#         - { id: 3, type: blueprint, name: crawler, job: image, depends: 1 }
-#         - { id: 4, type: blueprint, name: api, job: container, depends: 3 }
+    db:
+        container:
+            name: postgres
+            image: postgres
+            options:
+                - "--restart=always"
+            ports: ["5432", "5432"]
+            env: 
+            - &user ["POSTGRES_USER", "postgres"]
+            - &password ["POSTGRES_PASSWORD", "password"]
+            - &db ["POSTGRES_DB", "last"]
+            volumes:
+                - ["pg_data", "/var/lib/postgresql/data"]
+            hc:
+                cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
+                interval: "30s"
+                retries: 5
+flows:
+    - name: local_dev_docker_setup
+      tasks:
+        - { id: 0, type: Blueprint, name: db, job: container }
+        - { id: 1, type: Env, name: dev, job: set, depends: 0 }
+        - { id: 2, type: Blueprint, name: api, job: image, depends: 0 }
+        - { id: 3, type: Blueprint, name: api, job: container, depends: 2 }
+        - { id: 4, type: Blueprint, name: crawler, job: image, depends: 0 }
+        - { id: 5, type: Blueprint, name: crawler, job: container, depends: 4 }
+      pkg_dependencies: ["psql", "sqlx"]
+        
 env:
-    # dev:
-    - ["DATABASE_URL", "postgres://postgres:password@localhost:5432/last"]
+    dev:
+        - ["DATABASE_URL", "postgres://postgres:password@localhost:5432/last"]

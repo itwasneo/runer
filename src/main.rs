@@ -1,11 +1,13 @@
 use config::{Config, File, FileFormat};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::process::Command;
 
 #[derive(Deserialize)]
 struct Conf {
-    blueprints: Option<Vec<Blueprint>>,
-    env: Vec<(String, String)>,
+    blueprints: Option<HashMap<String, Blueprint>>,
+    env: Option<HashMap<String, Vec<(String, String)>>>,
+    flows: Option<Vec<Flow>>,
 }
 
 #[derive(Deserialize)]
@@ -44,10 +46,40 @@ struct HealthCheck {
 
 #[derive(Deserialize)]
 struct Blueprint {
-    name: String,
     _env: Option<Vec<(String, String)>>,
     image: Option<Image>,
     container: Option<Container>,
+}
+
+#[derive(Deserialize)]
+struct Flow {
+    name: String,
+    tasks: Vec<Task>,
+    pkg_dependencies: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct Task {
+    id: u32,
+    #[serde(rename = "type")]
+    typ: TaskType,
+    name: String,
+    job: JobType,
+    depends: Option<u32>,
+}
+
+#[derive(Deserialize)]
+enum TaskType {
+    Blueprint,
+    Env,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum JobType {
+    Container,
+    Image,
+    Set,
 }
 
 fn main() {
@@ -57,40 +89,54 @@ fn main() {
         .unwrap()
         .try_deserialize::<Conf>()
         .unwrap();
-    check_package_dependencies(vec!["psql", "sqlx"]);
 
-    if let Some(plans) = conf.blueprints {
-        // TODO: Change this ==================================================
-        if let Some(db) = plans.iter().find(|p| p.name.eq("db")) {
-            if let Some(container) = &db.container {
-                run_docker_container(container);
-            }
+    // TODO: Change this
+    let local_global_env = conf.env.unwrap_or_else(|| HashMap::new());
+    // ========================================================================
+
+    if let Some(blueprints) = conf.blueprints {
+        if let Some(flows) = conf.flows {
+            flows.iter().for_each(|f| {
+                if let Some(pkg_dependencies) = &f.pkg_dependencies {
+                    check_package_dependencies(pkg_dependencies);
+                }
+
+                if !f.tasks.is_empty() {
+                    f.tasks.iter().for_each(|t| match t.typ {
+                        TaskType::Blueprint => {
+                            let (tag, blueprint) =
+                                blueprints.get_key_value(&t.name).unwrap_or_else(|| {
+                                    panic!("For {}, no blueprint found.", t.name);
+                                });
+                            match t.job {
+                                JobType::Image => create_docker_image(
+                                    blueprint.image.as_ref().unwrap_or_else(|| {
+                                        panic!("No image job is defined in {}'s blueprint", tag);
+                                    }),
+                                ),
+                                JobType::Container => run_docker_container(
+                                    blueprint.container.as_ref().unwrap_or_else(|| {
+                                        panic!("No container job is defined {}'s blueprint", tag);
+                                    }),
+                                ),
+                                JobType::Set => {
+                                    todo!("Decide how to handle 'Set' jobs inside blueprints")
+                                }
+                            }
+                        }
+                        TaskType::Env => {
+                            let (_tag, env) =
+                                local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
+                                    panic!("For {}, no environment variable is found.", t.name);
+                                });
+                            set_environment_variables(env);
+                        }
+                    })
+                } else {
+                    panic!("Flow has to have at least one task.");
+                }
+            })
         }
-        // ====================================================================
-
-        set_environment_variables(conf.env);
-
-        // TODO: Change this ==================================================
-        if let Some(api) = plans.iter().find(|p| p.name.eq("api")) {
-            if let Some(image) = &api.image {
-                create_docker_image(image);
-            }
-
-            if let Some(container) = &api.container {
-                run_docker_container(container);
-            }
-        }
-
-        if let Some(crawler) = plans.iter().find(|p| p.name.eq("crawler")) {
-            if let Some(image) = &crawler.image {
-                create_docker_image(image);
-            }
-
-            if let Some(container) = &crawler.container {
-                run_docker_container(container);
-            }
-        }
-        // ====================================================================
     }
 }
 
@@ -100,7 +146,7 @@ fn main() {
 ///
 /// ---
 /// Panics if it finds an uninstalled package.
-fn check_package_dependencies(deps: Vec<&str>) {
+fn check_package_dependencies(deps: &Vec<String>) {
     deps.iter().for_each(|d| {
         let d_exists = Command::new("sh")
             .arg("-c")
@@ -294,7 +340,7 @@ fn create_commands_from_tokens<'a>(
 /// **execution** environment.
 ///
 /// First element gets used as KEY. Second element gets used as VALUE.
-fn set_environment_variables(key_values: Vec<(String, String)>) {
+fn set_environment_variables(key_values: &Vec<(String, String)>) {
     key_values.iter().for_each(|p| {
         std::env::set_var(&p.0, &p.1);
     })
