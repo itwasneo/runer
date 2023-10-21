@@ -1,7 +1,7 @@
 use config::{Config, File, FileFormat};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 
 #[derive(Deserialize)]
 struct Conf {
@@ -83,61 +83,97 @@ enum JobType {
 }
 
 fn main() {
+    // TODO: Change this
     let conf: Conf = Config::builder()
         .add_source(File::new(".runer", FileFormat::Yaml))
         .build()
         .unwrap()
         .try_deserialize::<Conf>()
         .unwrap();
-
-    // TODO: Change this
     let local_global_env = conf.env.unwrap_or_else(|| HashMap::new());
-    // ========================================================================
-
     if let Some(blueprints) = conf.blueprints {
         if let Some(flows) = conf.flows {
-            flows.iter().for_each(|f| {
-                if let Some(pkg_dependencies) = &f.pkg_dependencies {
-                    check_package_dependencies(pkg_dependencies);
-                }
+            run_flows(blueprints, flows, local_global_env);
+        }
+    }
+    // ========================================================================
+}
 
-                if !f.tasks.is_empty() {
-                    f.tasks.iter().for_each(|t| match t.typ {
-                        TaskType::Blueprint => {
-                            let (tag, blueprint) =
-                                blueprints.get_key_value(&t.name).unwrap_or_else(|| {
-                                    panic!("For {}, no blueprint found.", t.name);
-                                });
-                            match t.job {
-                                JobType::Image => create_docker_image(
+fn run_flows(
+    blueprints: HashMap<String, Blueprint>,
+    flows: Vec<Flow>,
+    local_global_env: HashMap<String, Vec<(String, String)>>,
+) {
+    flows.iter().for_each(|f| {
+        if let Some(pkg_dependencies) = &f.pkg_dependencies {
+            check_package_dependencies(pkg_dependencies);
+        }
+
+        let mut handles: HashMap<u32, Child> = HashMap::new();
+
+        if !f.tasks.is_empty() {
+            f.tasks.iter().for_each(|t| {
+                if let Some(depends) = t.depends {
+                    let handle = handles
+                        .get_mut(&depends)
+                        .unwrap_or_else(|| panic!("Can not find the parent process handle"));
+                    println!(
+                        "Waiting for task_id = {} to finish to start task_id = {} ",
+                        depends, t.id
+                    );
+                    while let Ok(None) = handle.try_wait() {
+                        handle.try_wait().expect("Something wrong");
+                    }
+                    // handle
+                    //     .wait()
+                    //     .expect("Something went wrong waiting for parent process");
+                    println!(
+                        "Waited for task_id = {} to finish to start task_id = {} ",
+                        depends, t.id
+                    );
+                }
+                match t.typ {
+                    TaskType::Blueprint => {
+                        let (tag, blueprint) =
+                            blueprints.get_key_value(&t.name).unwrap_or_else(|| {
+                                panic!("For {}, no blueprint found.", t.name);
+                            });
+                        match t.job {
+                            JobType::Image => {
+                                let handle = create_docker_image(
                                     blueprint.image.as_ref().unwrap_or_else(|| {
                                         panic!("No image job is defined in {}'s blueprint", tag);
                                     }),
-                                ),
-                                JobType::Container => run_docker_container(
+                                );
+                                handles.insert(t.id, handle);
+                            }
+                            JobType::Container => {
+                                let handle = run_docker_container(
                                     blueprint.container.as_ref().unwrap_or_else(|| {
                                         panic!("No container job is defined {}'s blueprint", tag);
                                     }),
-                                ),
-                                JobType::Set => {
-                                    todo!("Decide how to handle 'Set' jobs inside blueprints")
-                                }
+                                );
+                                handles.insert(t.id, handle);
+                            }
+                            JobType::Set => {
+                                todo!("Decide how to handle 'Set' jobs inside blueprints")
                             }
                         }
-                        TaskType::Env => {
-                            let (_tag, env) =
-                                local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
-                                    panic!("For {}, no environment variable is found.", t.name);
-                                });
-                            set_environment_variables(env);
-                        }
-                    })
-                } else {
-                    panic!("Flow has to have at least one task.");
+                    }
+                    TaskType::Env => {
+                        let (_tag, env) =
+                            local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
+                                panic!("For {}, no environment variable is found.", t.name);
+                            });
+                        let handle = set_environment_variables(env);
+                        handles.insert(t.id, handle);
+                    }
                 }
             })
+        } else {
+            panic!("Flow has to have at least one task.");
         }
-    }
+    })
 }
 
 /// Package Dependency Check:
@@ -147,10 +183,12 @@ fn main() {
 /// ---
 /// Panics if it finds an uninstalled package.
 fn check_package_dependencies(deps: &Vec<String>) {
+    println!("Checking package dependencies");
     deps.iter().for_each(|d| {
         let d_exists = Command::new("sh")
             .arg("-c")
             .arg(format!("command -v {}", d))
+            .stdout(Stdio::null())
             .output()
             .expect("Failed to execute <command>");
         if !d_exists.status.success() {
@@ -163,18 +201,13 @@ fn check_package_dependencies(deps: &Vec<String>) {
 ///
 /// ---
 /// Panics if <docker build> command returns non-success code.
-fn create_docker_image(docker_image: &Image) {
-    println!("Creating docker image for {}", docker_image.tag);
+fn create_docker_image(docker_image: &Image) -> Child {
+    println!("Starting to create docker image for {}", docker_image.tag);
+    let mut commands: Vec<String> = vec![];
     if let Some(pre) = &docker_image.pre {
         let mut cmds = create_commands_from_tokens(pre);
         cmds.iter_mut().for_each(|cmd| {
-            let result = cmd
-                .current_dir(&docker_image.context)
-                .output()
-                .expect("Failed to execute command");
-            if !result.status.success() {
-                panic!("RESULT: {:?}", result)
-            }
+            commands.push(format!("{:?}", cmd.current_dir(&docker_image.context)));
         });
     }
 
@@ -195,28 +228,23 @@ fn create_docker_image(docker_image: &Image) {
         });
     }
 
-    docker_build_command.arg(&docker_image.context);
-
-    let result = docker_build_command
-        .output()
-        .expect("Failed to execute docker build command.");
-    if !result.status.success() {
-        panic!("RESULT: {:?}", result)
-    }
-    println!("Docker image is created for {}", docker_image.tag);
+    commands.push(format!(
+        "{:?}",
+        docker_build_command.arg(&docker_image.context)
+    ));
 
     if let Some(post) = &docker_image.post {
         let mut cmds = create_commands_from_tokens(&post);
         cmds.iter_mut().for_each(|cmd| {
-            let result = cmd
-                .current_dir(&docker_image.context)
-                .output()
-                .expect("Failed to execute command");
-            if !result.status.success() {
-                panic!("RESULT: {:?}", result)
-            }
+            commands.push(format!("{:?}", cmd.current_dir(&docker_image.context)));
         });
     }
+    Command::new("sh")
+        .arg("-c")
+        .arg(commands.join(" && "))
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("Spawning <docker build> command failed.")
 }
 
 /// Runs a new docker container according to the given Container.
@@ -225,12 +253,11 @@ fn create_docker_image(docker_image: &Image) {
 /// Panics if an empty <entrypoint> command token array is provided.
 /// Panics if an empty <healthcheck> command token array is provided.
 /// Panics if <docker run> command returns non-success code.
-fn run_docker_container(docker_container: &Container) {
+fn run_docker_container(docker_container: &Container) -> Child {
+    println!("Starting {}", docker_container.name);
     let mut docker_run_command = Command::new("docker");
     docker_run_command.arg("run");
-
     docker_run_command.arg("-d");
-
     docker_run_command.args(["--name", &docker_container.name]);
 
     if let Some(env) = &docker_container.env {
@@ -288,15 +315,10 @@ fn run_docker_container(docker_container: &Container) {
 
     docker_run_command.arg(&docker_container.image);
 
-    let result = docker_run_command
-        .output()
-        .expect("Failed to execute docker build command.");
-    if !result.status.success() {
-        // TODO: In this case gracfully shutdown instead of panic.
-        panic!("RESULT: {:?}", result)
-    }
-
-    println!("Running container: {}", docker_container.name);
+    docker_run_command
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("Spawning <docker run> command failed.")
 }
 
 /// Creates a Command list from the given list of (ExecutionEnvironment, Vec<String>)
@@ -340,8 +362,14 @@ fn create_commands_from_tokens<'a>(
 /// **execution** environment.
 ///
 /// First element gets used as KEY. Second element gets used as VALUE.
-fn set_environment_variables(key_values: &Vec<(String, String)>) {
+fn set_environment_variables(key_values: &Vec<(String, String)>) -> Child {
     key_values.iter().for_each(|p| {
         std::env::set_var(&p.0, &p.1);
-    })
+    });
+    Command::new("sh")
+        .arg("-c")
+        .arg("echo \"Environment variables are set\"")
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("Spawning set_environment_variables success message command failed.")
 }
