@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
 struct Conf {
@@ -86,6 +86,7 @@ enum JobType {
 }
 
 fn main() {
+    let start = Instant::now();
     // TODO: Change this
     let conf: Conf = Config::builder()
         .add_source(File::new(".runer", FileFormat::Yaml))
@@ -100,6 +101,8 @@ fn main() {
         }
     }
     // ========================================================================
+    let duration = start.elapsed();
+    println!("Time elapsed: {:?}", duration);
 }
 
 fn run_flows(
@@ -125,7 +128,6 @@ fn run_flows(
             let local_global_env = local_global_env.clone();
             if let Some(_) = t.depends {
                 let thread_handler = thread::spawn(move || {
-                    println!("Spawning {}", t.id);
                     run_task(t, handles, blueprints, local_global_env);
                 });
                 thread_handlers.push(thread_handler);
@@ -151,6 +153,45 @@ fn run_flows(
     // })
 }
 
+fn wait_until_parent_task_command_is_finished(
+    parent_handle_id: u32,
+    child_task_id: u32,
+    handles: Arc<Mutex<HashMap<u32, Child>>>,
+) {
+    // Here it waits until the parent handle becomes available ================
+    let mut available = false;
+    while !available {
+        if let Ok(handles) = handles.lock() {
+            if handles.contains_key(&parent_handle_id) {
+                available = true;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    // Then it makes sure that the parent task finishes successfully ==========
+    if let Ok(mut handles) = handles.lock() {
+        let handle = handles.get_mut(&parent_handle_id).unwrap_or_else(|| {
+            panic!(
+                "Task {} can not find the parent process handle",
+                child_task_id
+            )
+        });
+        println!(
+            "Waiting for task_id = {} to finish to start task_id = {} ",
+            parent_handle_id, child_task_id
+        );
+
+        handle
+            .wait()
+            .expect("Something went wrong waiting for parent process");
+        println!(
+            "Waited for task_id = {} to finish to start task_id = {} ",
+            parent_handle_id, child_task_id
+        );
+    }
+}
+
 fn run_task(
     t: Task,
     handles: Arc<Mutex<HashMap<u32, Child>>>,
@@ -158,32 +199,7 @@ fn run_task(
     local_global_env: Arc<HashMap<String, Vec<(String, String)>>>,
 ) {
     if let Some(depends) = t.depends {
-        let mut available = false;
-        while !available {
-            if let Ok(handles) = handles.lock() {
-                if handles.contains_key(&depends) {
-                    available = true;
-                }
-            }
-            thread::sleep(Duration::from_millis(200));
-        }
-        if let Ok(mut handles) = handles.lock() {
-            let handle = handles
-                .get_mut(&depends)
-                .unwrap_or_else(|| panic!("Task {} can not find the parent process handle", t.id));
-            println!(
-                "Waiting for task_id = {} to finish to start task_id = {} ",
-                depends, t.id
-            );
-
-            handle
-                .wait()
-                .expect("Something went wrong waiting for parent process");
-            println!(
-                "Waited for task_id = {} to finish to start task_id = {} ",
-                depends, t.id
-            );
-        }
+        wait_until_parent_task_command_is_finished(depends, t.id, handles.clone());
     }
     if let Ok(mut handles) = handles.lock() {
         match t.typ {
@@ -338,6 +354,8 @@ fn run_docker_container(docker_container: &Container) -> Child {
     if let Some(hc) = &docker_container.hc {
         if !hc.cmd.1.is_empty() {
             match &hc.cmd.0 {
+                // TODO: This is wrong if it is Local should be handled differently
+                // --health-cmd is a docker run command option
                 ExecutionEnvironment::Local => {
                     docker_run_command.args(["--health-cmd", &hc.cmd.1]);
                 }

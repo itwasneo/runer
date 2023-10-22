@@ -48,19 +48,19 @@ blueprints:
             - &db ["POSTGRES_DB", "last"]
             volumes:
                 - ["pg_data", "/var/lib/postgresql/data"]
-            # hc:
-            #     cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
-            #     interval: "30s"
-            #     retries: 5
+            hc:
+                cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
+                interval: "30s"
+                retries: 5
 flows:
     - name: local_dev_docker_setup
       tasks:
         - { id: 0, type: Blueprint, name: db, job: container }
-        - { id: 1, type: Env, name: dev, job: set, depends: 0 }
-        - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
-        - { id: 3, type: Blueprint, name: api, job: container, depends: 2 }
-        - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }
-        - { id: 5, type: Blueprint, name: crawler, job: container, depends: 4 }
+        # - { id: 1, type: Env, name: dev, job: set, depends: 0 }
+        # - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
+        - { id: 3, type: Blueprint, name: api, job: container, depends: 0 }
+        # - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }
+        - { id: 5, type: Blueprint, name: crawler, job: container, depends: 0 }
       pkg_dependencies: ["psql", "sqlx"]
         
 env:
