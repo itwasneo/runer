@@ -28,7 +28,7 @@ Right now, runer is just an executable that can parse a given _.runer_ file
 In the current state, it basically mimics _docker-compose_ with additional
 features.
 
-In its current state with 400 lines of heavily poluted code, I've managed most 
+In its current state with 400 lines of heavily polluted code, I've managed most 
 of the functionality that **I** need from a CLI tool like _docker-compose_.
 
 # Goals
