@@ -48,10 +48,10 @@ blueprints:
             - &db ["POSTGRES_DB", "last"]
             volumes:
                 - ["pg_data", "/var/lib/postgresql/data"]
-            hc:
-                cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
-                interval: "30s"
-                retries: 5
+            # hc:
+            #     cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
+            #     interval: "30s"
+            #     retries: 5
 flows:
     - name: local_dev_docker_setup
       tasks:

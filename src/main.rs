@@ -2,6 +2,9 @@ use config::{Config, File, FileFormat};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct Conf {
@@ -51,14 +54,14 @@ struct Blueprint {
     container: Option<Container>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Flow {
     name: String,
     tasks: Vec<Task>,
     pkg_dependencies: Option<Vec<String>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Task {
     id: u32,
     #[serde(rename = "type")]
@@ -68,13 +71,13 @@ struct Task {
     depends: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 enum TaskType {
     Blueprint,
     Env,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 enum JobType {
     Container,
@@ -104,76 +107,120 @@ fn run_flows(
     flows: Vec<Flow>,
     local_global_env: HashMap<String, Vec<(String, String)>>,
 ) {
-    flows.iter().for_each(|f| {
-        if let Some(pkg_dependencies) = &f.pkg_dependencies {
-            check_package_dependencies(pkg_dependencies);
+    let f = flows[0].clone();
+    // flows.iter().for_each(|f| {
+    if let Some(pkg_dependencies) = &f.pkg_dependencies {
+        check_package_dependencies(pkg_dependencies);
+    }
+
+    let handles = Arc::new(Mutex::new(HashMap::<u32, Child>::new()));
+    let blueprints = Arc::new(blueprints);
+    let local_global_env = Arc::new(local_global_env);
+    let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
+
+    if !f.tasks.is_empty() {
+        for t in f.tasks {
+            let handles = handles.clone();
+            let blueprints = blueprints.clone();
+            let local_global_env = local_global_env.clone();
+            if let Some(_) = t.depends {
+                let thread_handler = thread::spawn(move || {
+                    println!("Spawning {}", t.id);
+                    run_task(t, handles, blueprints, local_global_env);
+                });
+                thread_handlers.push(thread_handler);
+            } else {
+                run_task(t, handles, blueprints, local_global_env);
+            }
         }
 
-        let mut handles: HashMap<u32, Child> = HashMap::new();
+        for h in thread_handlers {
+            h.join().unwrap();
+        }
 
-        if !f.tasks.is_empty() {
-            f.tasks.iter().for_each(|t| {
-                if let Some(depends) = t.depends {
-                    let handle = handles
-                        .get_mut(&depends)
-                        .unwrap_or_else(|| panic!("Can not find the parent process handle"));
-                    println!(
-                        "Waiting for task_id = {} to finish to start task_id = {} ",
-                        depends, t.id
-                    );
-                    while let Ok(None) = handle.try_wait() {
-                        handle.try_wait().expect("Something wrong");
-                    }
-                    // handle
-                    //     .wait()
-                    //     .expect("Something went wrong waiting for parent process");
-                    println!(
-                        "Waited for task_id = {} to finish to start task_id = {} ",
-                        depends, t.id
-                    );
+        // Making sure every command exited gracefully
+        if let Ok(mut handles) = handles.lock() {
+            handles.iter_mut().for_each(|p| {
+                p.1.wait()
+                    .unwrap_or_else(|e| panic!("There are unsuccessfull commands. Error: {}", e));
+            });
+        }
+    } else {
+        panic!("Flow has to have at least one task.");
+    }
+    // })
+}
+
+fn run_task(
+    t: Task,
+    handles: Arc<Mutex<HashMap<u32, Child>>>,
+    blueprints: Arc<HashMap<String, Blueprint>>,
+    local_global_env: Arc<HashMap<String, Vec<(String, String)>>>,
+) {
+    if let Some(depends) = t.depends {
+        let mut available = false;
+        while !available {
+            if let Ok(handles) = handles.lock() {
+                if handles.contains_key(&depends) {
+                    available = true;
                 }
-                match t.typ {
-                    TaskType::Blueprint => {
-                        let (tag, blueprint) =
-                            blueprints.get_key_value(&t.name).unwrap_or_else(|| {
-                                panic!("For {}, no blueprint found.", t.name);
-                            });
-                        match t.job {
-                            JobType::Image => {
-                                let handle = create_docker_image(
-                                    blueprint.image.as_ref().unwrap_or_else(|| {
-                                        panic!("No image job is defined in {}'s blueprint", tag);
-                                    }),
-                                );
-                                handles.insert(t.id, handle);
-                            }
-                            JobType::Container => {
-                                let handle = run_docker_container(
-                                    blueprint.container.as_ref().unwrap_or_else(|| {
-                                        panic!("No container job is defined {}'s blueprint", tag);
-                                    }),
-                                );
-                                handles.insert(t.id, handle);
-                            }
-                            JobType::Set => {
-                                todo!("Decide how to handle 'Set' jobs inside blueprints")
-                            }
-                        }
-                    }
-                    TaskType::Env => {
-                        let (_tag, env) =
-                            local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
-                                panic!("For {}, no environment variable is found.", t.name);
-                            });
-                        let handle = set_environment_variables(env);
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        if let Ok(mut handles) = handles.lock() {
+            let handle = handles
+                .get_mut(&depends)
+                .unwrap_or_else(|| panic!("Task {} can not find the parent process handle", t.id));
+            println!(
+                "Waiting for task_id = {} to finish to start task_id = {} ",
+                depends, t.id
+            );
+
+            handle
+                .wait()
+                .expect("Something went wrong waiting for parent process");
+            println!(
+                "Waited for task_id = {} to finish to start task_id = {} ",
+                depends, t.id
+            );
+        }
+    }
+    if let Ok(mut handles) = handles.lock() {
+        match t.typ {
+            TaskType::Blueprint => {
+                let (tag, blueprint) = blueprints.get_key_value(&t.name).unwrap_or_else(|| {
+                    panic!("For {}, no blueprint found.", t.name);
+                });
+                match t.job {
+                    JobType::Image => {
+                        let handle =
+                            create_docker_image(blueprint.image.as_ref().unwrap_or_else(|| {
+                                panic!("No image job is defined in {}'s blueprint", tag);
+                            }));
                         handles.insert(t.id, handle);
                     }
+                    JobType::Container => {
+                        let handle = run_docker_container(
+                            blueprint.container.as_ref().unwrap_or_else(|| {
+                                panic!("No container job is defined {}'s blueprint", tag);
+                            }),
+                        );
+                        handles.insert(t.id, handle);
+                    }
+                    JobType::Set => {
+                        todo!("Decide how to handle 'Set' jobs inside blueprints")
+                    }
                 }
-            })
-        } else {
-            panic!("Flow has to have at least one task.");
+            }
+            TaskType::Env => {
+                let (_tag, env) = local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
+                    panic!("For {}, no environment variable is found.", t.name);
+                });
+                let handle = set_environment_variables(env);
+                handles.insert(t.id, handle);
+            }
         }
-    })
+    }
 }
 
 /// Package Dependency Check:
