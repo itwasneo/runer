@@ -1,174 +1,99 @@
-use config::{Config, File, FileFormat};
-use serde::Deserialize;
+mod engine;
+mod model;
+
+use anyhow::Result;
+use engine::extractor::*;
+use model::runer::*;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 
-#[derive(Deserialize)]
-struct Conf {
-    blueprints: Option<HashMap<String, Blueprint>>,
-    env: Option<HashMap<String, Vec<(String, String)>>>,
-    flows: Option<Vec<Flow>>,
-}
+use crate::engine::executor::execute_flow;
+use crate::engine::state::State;
 
-#[derive(Deserialize)]
-struct Image {
-    context: String,
-    tag: String,
-    options: Option<Vec<String>>,
-    build_args: Option<Vec<String>>,
-    pre: Option<Vec<(ExecutionEnvironment, Vec<String>)>>,
-    post: Option<Vec<(ExecutionEnvironment, Vec<String>)>>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ExecutionEnvironment {
-    Local,
-    Container(String),
-}
-
-#[derive(Deserialize)]
-struct Container {
-    name: String,
-    image: String,
-    ports: Option<(String, String)>,
-    env: Option<Vec<(String, String)>>,
-    volumes: Option<Vec<(String, String)>>,
-    entrypoint: Option<Vec<String>>,
-    hc: Option<HealthCheck>,
-}
-
-#[derive(Deserialize)]
-struct HealthCheck {
-    command: (ExecutionEnvironment, String),
-    interval: Option<String>,
-    retries: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct Shell {
-    commands: Vec<String>,
-    env: Option<Vec<(String, String)>>,
-}
-
-#[derive(Deserialize)]
-struct Blueprint {
-    _env: Option<Vec<(String, String)>>,
-    image: Option<Image>,
-    container: Option<Container>,
-    shell: Option<Shell>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Flow {
-    name: String,
-    tasks: Vec<Task>,
-    pkg_dependencies: Option<Vec<String>>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Task {
-    id: u32,
-    #[serde(rename = "type")]
-    typ: TaskType,
-    name: String,
-    job: JobType,
-    depends: Option<u32>,
-}
-
-#[derive(Deserialize, Clone)]
-enum TaskType {
-    Blueprint,
-    Env,
-}
-
-#[derive(Deserialize, Clone)]
-#[serde(rename_all = "lowercase")]
-enum JobType {
-    Container,
-    Image,
-    Shell,
-    Set,
-}
-
-fn main() {
+fn main() -> Result<()> {
     let start = Instant::now();
-    // TODO: Change this
-    let conf: Conf = Config::builder()
-        .add_source(File::new(".runer", FileFormat::Yaml))
-        .build()
-        .unwrap()
-        .try_deserialize::<Conf>()
-        .unwrap();
-    let local_global_env = conf.env.unwrap_or_else(|| HashMap::new());
-    if let Some(blueprints) = conf.blueprints {
-        if let Some(flows) = conf.flows {
-            run_flows(blueprints, flows, local_global_env);
-        }
-    }
+    env_logger::init();
+
+    let rune = extract_rune(".runer")?;
+
+    analyze_fragments(&rune);
+
+    let state = State::default().from_rune(rune);
+    // run_flows(state);
+    execute_flow(0, state).unwrap();
     // ========================================================================
     let duration = start.elapsed();
     println!("Time elapsed: {:?}", duration);
+    Ok(())
 }
 
-fn run_flows(
-    blueprints: HashMap<String, Blueprint>,
-    flows: Vec<Flow>,
-    local_global_env: HashMap<String, Vec<(String, String)>>,
-) {
-    let f = flows[0].clone();
-    // flows.iter().for_each(|f| {
-    if let Some(pkg_dependencies) = &f.pkg_dependencies {
-        check_package_dependencies(pkg_dependencies);
-    }
-
-    let handles = Arc::new(Mutex::new(HashMap::<u32, Child>::new()));
-    let blueprints = Arc::new(blueprints);
-    let local_global_env = Arc::new(local_global_env);
-    let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
-
-    if !f.tasks.is_empty() {
-        for t in f.tasks {
-            let handles = handles.clone();
-            let blueprints = blueprints.clone();
-            let local_global_env = local_global_env.clone();
-            if let Some(_) = t.depends {
-                let thread_handler = thread::spawn(move || {
-                    run_task(t, handles, blueprints, local_global_env);
-                });
-                thread_handlers.push(thread_handler);
-            } else {
-                run_task(t, handles, blueprints, local_global_env);
-            }
-        }
-
-        for h in thread_handlers {
-            h.join().unwrap();
-        }
-
-        // Making sure every command exited gracefully
-        if let Ok(mut handles) = handles.lock() {
-            handles.iter_mut().for_each(|p| {
-                // TODO: Change this to try_wait and handle results separately
-                match p.1.try_wait() {
-                    Ok(Some(status)) => println!("exited with: {status}"),
-                    Ok(None) => {
-                        println!("status not ready yet, let's really wait");
-                        let res = p.1.wait();
-                        println!("result: {res:?}");
-                    }
-                    Err(e) => panic!("error attempting to wait: {e}"),
-                }
-            });
-        }
-    } else {
-        panic!("Flow has to have at least one task.");
-    }
-    // })
-}
+// pub fn run_flows(state: State) {
+//     // let flows = state.flows.as_ref().unwrap();
+//     if let Some(flows) = state.flows {
+//         let flows = flows.as_ref().clone();
+//         flows.iter().for_each(|f| {
+//             if let Some(pkg_dependencies) = &f.pkg_dependencies {
+//                 check_package_dependencies(pkg_dependencies);
+//             }
+//
+//             let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
+//
+//             if !f.tasks.is_empty() {
+//                 // f.tasks.iter().for_each(|t| {
+//                 //     let handles = state.handles.as_ref().unwrap().clone();
+//                 //     let blueprints = state.blueprints.as_ref().unwrap().clone();
+//                 //     let env = state.env.as_ref().unwrap().clone();
+//                 //     if let Some(_) = t.depends {
+//                 //         let thread_handler = thread::spawn(|| {
+//                 //             run_task(t.clone(), handles, blueprints, env);
+//                 //         });
+//                 //         thread_handlers.push(thread_handler);
+//                 //     } else {
+//                 //         run_task(t.clone(), handles, blueprints, env);
+//                 //     }
+//                 // });
+//                 for t in f.tasks {
+//                     let handles = state.handles.as_ref().unwrap().clone();
+//                     let blueprints = state.blueprints.as_ref().unwrap().clone();
+//                     let env = state.env.as_ref().unwrap().clone();
+//                     if let Some(_) = t.depends {
+//                         let thread_handler = thread::spawn(move || {
+//                             run_task(t, handles, blueprints, env);
+//                         });
+//                         thread_handlers.push(thread_handler);
+//                     } else {
+//                         run_task(t, handles, blueprints, env);
+//                     }
+//                 }
+//
+//                 for h in thread_handlers {
+//                     h.join().unwrap();
+//                 }
+//
+//                 // Making sure every command exited gracefully
+//                 if let Ok(mut handles) = state.handles.as_ref().unwrap().lock() {
+//                     handles.iter_mut().for_each(|p| {
+//                         // TODO: Change this to try_wait and handle results separately
+//                         match p.1.try_wait() {
+//                             Ok(Some(status)) => println!("exited with: {status}"),
+//                             Ok(None) => {
+//                                 println!("status not ready yet, let's really wait");
+//                                 let res = p.1.wait();
+//                                 println!("result: {res:?}");
+//                             }
+//                             Err(e) => panic!("error attempting to wait: {e}"),
+//                         }
+//                     });
+//                 }
+//             } else {
+//                 panic!("Flow has to have at least one task.");
+//             }
+//         })
+//     }
+// }
 
 fn wait_until_parent_task_command_is_finished(
     parent_handle_id: u32,
@@ -183,29 +108,30 @@ fn wait_until_parent_task_command_is_finished(
                 available = true;
             }
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(5));
     }
 
     // Then it makes sure that the parent task finishes successfully ==========
-    if let Ok(mut handles) = handles.lock() {
-        let handle = handles.get_mut(&parent_handle_id).unwrap_or_else(|| {
-            panic!(
-                "Task {} can not find the parent process handle",
-                child_task_id
-            )
-        });
-        println!(
-            "Waiting for task_id = {} to finish to start task_id = {} ",
-            parent_handle_id, child_task_id
-        );
-
-        handle
-            .wait()
-            .expect("Something went wrong waiting for parent process");
-        println!(
-            "Waited for task_id = {} to finish to start task_id = {} ",
-            parent_handle_id, child_task_id
-        );
+    let mut finished_successfully = false;
+    while !finished_successfully {
+        if let Ok(mut handles) = handles.lock() {
+            let handle = handles.get_mut(&parent_handle_id).unwrap_or_else(|| {
+                panic!(
+                    "Task {} can not find the parent process handle",
+                    child_task_id
+                )
+            });
+            match handle.try_wait() {
+                Ok(Some(status)) => {
+                    if status.success() {
+                        finished_successfully = true;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => panic!("error attempting to wait: {e}"),
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -263,38 +189,19 @@ fn run_task(
     }
 }
 
-/// Package Dependency Check:
-/// Checks whether the execution environment has the necessary packages given
-/// installed.
-///
-/// ---
-/// Panics if it finds an uninstalled package.
-fn check_package_dependencies(deps: &Vec<String>) {
-    println!("Checking package dependencies");
-    deps.iter().for_each(|d| {
-        let d_exists = Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {}", d))
-            .stdout(Stdio::null())
-            .output()
-            .expect("Failed to execute <command>");
-        if !d_exists.status.success() {
-            panic!("{} is not installed", d);
-        }
-    });
-}
-
 /// Creates a new docker image(if it doesn't exist) according to given Image.
 ///
 /// ---
 /// Panics if <docker build> command returns non-success code.
 fn create_docker_image(docker_image: &Image) -> Child {
     println!("Starting to create docker image for {}", docker_image.tag);
-    let mut commands: Vec<String> = vec![];
     if let Some(pre) = &docker_image.pre {
-        let mut cmds = create_commands_from_tokens(pre);
-        cmds.iter_mut().for_each(|cmd| {
-            commands.push(format!("{:?}", cmd.current_dir(&docker_image.context)));
+        pre.iter().for_each(|p| {
+            Command::new("sh")
+                .arg("-c")
+                .arg(p.1.clone())
+                .output()
+                .expect("Something went wrong");
         });
     }
 
@@ -315,20 +222,25 @@ fn create_docker_image(docker_image: &Image) -> Child {
         });
     }
 
-    commands.push(format!(
-        "{:?}",
-        docker_build_command.arg(&docker_image.context)
-    ));
+    docker_build_command
+        .arg(&docker_image.context)
+        .output()
+        .expect("Something went wrong");
 
     if let Some(post) = &docker_image.post {
-        let mut cmds = create_commands_from_tokens(&post);
-        cmds.iter_mut().for_each(|cmd| {
-            commands.push(format!("{:?}", cmd.current_dir(&docker_image.context)));
+        post.iter().for_each(|p| {
+            Command::new("sh")
+                .arg("-c")
+                .arg(p.1.clone())
+                .output()
+                .expect("Something went wrong");
         });
     }
+
     Command::new("sh")
+        .current_dir(&docker_image.context)
         .arg("-c")
-        .arg(commands.join(" && "))
+        .arg("echo DONE")
         .stdout(Stdio::null())
         .spawn()
         .expect("Spawning <docker build> command failed.")
@@ -433,31 +345,31 @@ fn run_shell_script(shell: &Shell) -> Child {
 ///
 /// ---
 /// Panics if the given Vec<String> is empty.
-fn create_commands_from_tokens<'a>(
-    env_and_tokens: &Vec<(ExecutionEnvironment, Vec<String>)>,
-) -> Vec<Command> {
-    env_and_tokens
-        .iter()
-        .map(|e_ts| {
-            if !e_ts.1.is_empty() {
-                match &e_ts.0 {
-                    ExecutionEnvironment::Local => {
-                        let mut cmd = Command::new(&e_ts.1[0]);
-                        e_ts.1[1..].iter().for_each(|token| {
-                            cmd.arg(token);
-                        });
-                        return cmd;
-                    }
-                    ExecutionEnvironment::Container(_container_identification) => {
-                        todo!("Implement command execution in Container")
-                    }
-                }
-            } else {
-                panic!("Empty command tokens array is not allowed.")
-            }
-        })
-        .collect()
-}
+// fn create_commands_from_tokens<'a>(
+//     env_and_tokens: &Vec<(ExecutionEnvironment, String)>,
+// ) -> Vec<Command> {
+//     env_and_tokens
+//         .iter()
+//         .map(|e_ts| {
+//             if !e_ts.1.is_empty() {
+//                 match &e_ts.0 {
+//                     ExecutionEnvironment::Local => {
+//                         let mut cmd = Command::new(&e_ts.1[0]);
+//                         e_ts.1[1..].iter().for_each(|token| {
+//                             cmd.arg(token);
+//                         });
+//                         return cmd;
+//                     }
+//                     ExecutionEnvironment::Container(_container_identification) => {
+//                         todo!("Implement command execution in Container")
+//                     }
+//                 }
+//             } else {
+//                 panic!("Empty command tokens array is not allowed.")
+//             }
+//         })
+//         .collect()
+// }
 
 /// Sets the given (String, String) tuples as environment variables inside the
 /// **execution** environment.
