@@ -13,7 +13,7 @@ blueprints:
             image: itwasneo/last-api:latest
             ports: ["8081", "8081"]
             env: 
-                - ["API_HOST", "127.0.0.1"]
+                - ["API_HOST", "0.0.0.0"]
                 - ["API_PORT", "8081"]
                 - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
                 - ["DB_POOL_MAX_CONNECTIONS", "20"]
@@ -49,14 +49,32 @@ blueprints:
             volumes:
                 - ["pg_data", "/var/lib/postgresql/data"]
             hc:
-                cmd: [Local, "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
+                command: [Container("db"), "psql postgres://postgres:password@postgres:5432/last -c \"\\q\""] 
                 interval: "30s"
                 retries: 5
+
+    # test shell script
+    test:
+        shell:
+            commands:
+                - "cd /home/itwasneo/git/last/api" 
+                - "cargo sqlx prepare" 
+                - "cargo run"
+                - "cd /home/itwasneo/git/last/crawler"
+                - "cargo sqlx prepare"
+                - "cargo run"
+            env: 
+                - ["API_HOST", "127.0.0.1"]
+                - ["API_PORT", "8081"]
+                - ["DATABASE_URL", "postgres://postgres:password@localhost:5432/last"]
+                - ["DB_POOL_MAX_CONNECTIONS", "20"]
+        
 flows:
     - name: local_dev_docker_setup
       tasks:
         - { id: 0, type: Blueprint, name: db, job: container }
-        # - { id: 1, type: Env, name: dev, job: set, depends: 0 }
+        # - { id: 1, type: Blueprint, name: test, job: shell, depends: 0 }
+        - { id: 1, type: Env, name: dev, job: set, depends: 0 }
         # - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
         - { id: 3, type: Blueprint, name: api, job: container, depends: 0 }
         # - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }

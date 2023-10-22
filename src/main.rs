@@ -24,6 +24,7 @@ struct Image {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
 enum ExecutionEnvironment {
     Local,
     Container(String),
@@ -42,9 +43,15 @@ struct Container {
 
 #[derive(Deserialize)]
 struct HealthCheck {
-    cmd: (ExecutionEnvironment, String),
+    command: (ExecutionEnvironment, String),
     interval: Option<String>,
     retries: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct Shell {
+    commands: Vec<String>,
+    env: Option<Vec<(String, String)>>,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +59,7 @@ struct Blueprint {
     _env: Option<Vec<(String, String)>>,
     image: Option<Image>,
     container: Option<Container>,
+    shell: Option<Shell>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -82,6 +90,7 @@ enum TaskType {
 enum JobType {
     Container,
     Image,
+    Shell,
     Set,
 }
 
@@ -143,8 +152,16 @@ fn run_flows(
         // Making sure every command exited gracefully
         if let Ok(mut handles) = handles.lock() {
             handles.iter_mut().for_each(|p| {
-                p.1.wait()
-                    .unwrap_or_else(|e| panic!("There are unsuccessfull commands. Error: {}", e));
+                // TODO: Change this to try_wait and handle results separately
+                match p.1.try_wait() {
+                    Ok(Some(status)) => println!("exited with: {status}"),
+                    Ok(None) => {
+                        println!("status not ready yet, let's really wait");
+                        let res = p.1.wait();
+                        println!("result: {res:?}");
+                    }
+                    Err(e) => panic!("error attempting to wait: {e}"),
+                }
             });
         }
     } else {
@@ -225,6 +242,13 @@ fn run_task(
                     }
                     JobType::Set => {
                         todo!("Decide how to handle 'Set' jobs inside blueprints")
+                    }
+                    JobType::Shell => {
+                        let handle =
+                            run_shell_script(blueprint.shell.as_ref().unwrap_or_else(|| {
+                                panic!("No shell job is defined {}'s blueprint", tag);
+                            }));
+                        handles.insert(t.id, handle);
                     }
                 }
             }
@@ -352,15 +376,13 @@ fn run_docker_container(docker_container: &Container) -> Child {
     }
 
     if let Some(hc) = &docker_container.hc {
-        if !hc.cmd.1.is_empty() {
-            match &hc.cmd.0 {
-                // TODO: This is wrong if it is Local should be handled differently
-                // --health-cmd is a docker run command option
+        if !hc.command.1.is_empty() {
+            match &hc.command.0 {
                 ExecutionEnvironment::Local => {
-                    docker_run_command.args(["--health-cmd", &hc.cmd.1]);
+                    todo!("Implement command execution in Container")
                 }
                 ExecutionEnvironment::Container(_container_identification) => {
-                    todo!("Implement command execution in Container")
+                    docker_run_command.args(["--health-cmd", &hc.command.1]);
                 }
             }
         } else {
@@ -384,6 +406,20 @@ fn run_docker_container(docker_container: &Container) -> Child {
         .stdout(Stdio::null())
         .spawn()
         .expect("Spawning <docker run> command failed.")
+}
+
+fn run_shell_script(shell: &Shell) -> Child {
+    println!("Starting to run shell script");
+    if let Some(environment_variables) = &shell.env {
+        set_environment_variables(environment_variables)
+            .wait()
+            .expect("Something went wrong setting up environment variables");
+    }
+    Command::new("sh")
+        .arg("-c")
+        .arg(shell.commands.join(" && "))
+        .spawn()
+        .expect("Spawning <script> command failed.")
 }
 
 /// Creates a Command list from the given list of (ExecutionEnvironment, Vec<String>)
