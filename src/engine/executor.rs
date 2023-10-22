@@ -2,6 +2,7 @@ use std::process::{Command, Stdio};
 use std::thread::{self, JoinHandle};
 
 use anyhow::{anyhow, Result};
+use log::info;
 
 use crate::run_task;
 
@@ -40,7 +41,7 @@ pub fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
                     handles.iter_mut().for_each(|p| {
                         // TODO: Change this to try_wait and handle results separately
                         match p.1.try_wait() {
-                            Ok(Some(status)) => println!("exited with: {status}"),
+                            Ok(Some(status)) => info!("Task {} exited with: {status}", p.0),
                             Ok(None) => {
                                 let _ = p.1.wait();
                             }
