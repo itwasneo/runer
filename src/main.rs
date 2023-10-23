@@ -3,6 +3,7 @@ mod model;
 
 use anyhow::Result;
 use engine::extractor::*;
+use log::info;
 use model::runer::*;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
@@ -13,6 +14,8 @@ use std::time::{Duration, Instant};
 use crate::engine::executor::execute_flow;
 use crate::engine::state::State;
 
+use self::engine::executor::{run_shell_script, set_environment_variables};
+
 fn main() -> Result<()> {
     let start = Instant::now();
     env_logger::init();
@@ -22,80 +25,14 @@ fn main() -> Result<()> {
     analyze_fragments(&rune);
 
     let state = State::default().from_rune(rune);
-    // run_flows(state);
-    execute_flow(0, state).unwrap();
-    // ========================================================================
+    smol::block_on(execute_flow(0, state))?;
+
     let duration = start.elapsed();
-    println!("Time elapsed: {:?}", duration);
+    info!("Time elapsed: {:?}", duration);
     Ok(())
 }
 
-// pub fn run_flows(state: State) {
-//     // let flows = state.flows.as_ref().unwrap();
-//     if let Some(flows) = state.flows {
-//         let flows = flows.as_ref().clone();
-//         flows.iter().for_each(|f| {
-//             if let Some(pkg_dependencies) = &f.pkg_dependencies {
-//                 check_package_dependencies(pkg_dependencies);
-//             }
-//
-//             let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
-//
-//             if !f.tasks.is_empty() {
-//                 // f.tasks.iter().for_each(|t| {
-//                 //     let handles = state.handles.as_ref().unwrap().clone();
-//                 //     let blueprints = state.blueprints.as_ref().unwrap().clone();
-//                 //     let env = state.env.as_ref().unwrap().clone();
-//                 //     if let Some(_) = t.depends {
-//                 //         let thread_handler = thread::spawn(|| {
-//                 //             run_task(t.clone(), handles, blueprints, env);
-//                 //         });
-//                 //         thread_handlers.push(thread_handler);
-//                 //     } else {
-//                 //         run_task(t.clone(), handles, blueprints, env);
-//                 //     }
-//                 // });
-//                 for t in f.tasks {
-//                     let handles = state.handles.as_ref().unwrap().clone();
-//                     let blueprints = state.blueprints.as_ref().unwrap().clone();
-//                     let env = state.env.as_ref().unwrap().clone();
-//                     if let Some(_) = t.depends {
-//                         let thread_handler = thread::spawn(move || {
-//                             run_task(t, handles, blueprints, env);
-//                         });
-//                         thread_handlers.push(thread_handler);
-//                     } else {
-//                         run_task(t, handles, blueprints, env);
-//                     }
-//                 }
-//
-//                 for h in thread_handlers {
-//                     h.join().unwrap();
-//                 }
-//
-//                 // Making sure every command exited gracefully
-//                 if let Ok(mut handles) = state.handles.as_ref().unwrap().lock() {
-//                     handles.iter_mut().for_each(|p| {
-//                         // TODO: Change this to try_wait and handle results separately
-//                         match p.1.try_wait() {
-//                             Ok(Some(status)) => println!("exited with: {status}"),
-//                             Ok(None) => {
-//                                 println!("status not ready yet, let's really wait");
-//                                 let res = p.1.wait();
-//                                 println!("result: {res:?}");
-//                             }
-//                             Err(e) => panic!("error attempting to wait: {e}"),
-//                         }
-//                     });
-//                 }
-//             } else {
-//                 panic!("Flow has to have at least one task.");
-//             }
-//         })
-//     }
-// }
-
-fn wait_until_parent_task_command_is_finished(
+pub fn wait_until_parent_task_command_is_finished(
     parent_handle_id: u32,
     child_task_id: u32,
     handles: Arc<Mutex<HashMap<u32, Child>>>,
@@ -135,7 +72,7 @@ fn wait_until_parent_task_command_is_finished(
     }
 }
 
-fn run_task(
+pub fn run_task(
     t: Task,
     handles: Arc<Mutex<HashMap<u32, Child>>>,
     blueprints: Arc<HashMap<String, Blueprint>>,
@@ -170,11 +107,11 @@ fn run_task(
                         todo!("Decide how to handle 'Set' jobs inside blueprints")
                     }
                     JobType::Shell => {
-                        let handle =
+                        let _handle =
                             run_shell_script(blueprint.shell.as_ref().unwrap_or_else(|| {
                                 panic!("No shell job is defined {}'s blueprint", tag);
                             }));
-                        handles.insert(t.id, handle);
+                        // handles.insert(t.id, handle);
                     }
                 }
             }
@@ -182,8 +119,8 @@ fn run_task(
                 let (_tag, env) = local_global_env.get_key_value(&t.name).unwrap_or_else(|| {
                     panic!("For {}, no environment variable is found.", t.name);
                 });
-                let handle = set_environment_variables(env);
-                handles.insert(t.id, handle);
+                let _handle = set_environment_variables(env);
+                // handles.insert(t.id, handle);
             }
         }
     }
@@ -193,7 +130,7 @@ fn run_task(
 ///
 /// ---
 /// Panics if <docker build> command returns non-success code.
-fn create_docker_image(docker_image: &Image) -> Child {
+pub fn create_docker_image(docker_image: &Image) -> Child {
     println!("Starting to create docker image for {}", docker_image.tag);
     if let Some(pre) = &docker_image.pre {
         pre.iter().for_each(|p| {
@@ -252,7 +189,7 @@ fn create_docker_image(docker_image: &Image) -> Child {
 /// Panics if an empty <entrypoint> command token array is provided.
 /// Panics if an empty <healthcheck> command token array is provided.
 /// Panics if <docker run> command returns non-success code.
-fn run_docker_container(docker_container: &Container) -> Child {
+pub fn run_docker_container(docker_container: &Container) -> Child {
     println!("Starting {}", docker_container.name);
     let mut docker_run_command = Command::new("docker");
     docker_run_command.arg("run");
@@ -318,71 +255,4 @@ fn run_docker_container(docker_container: &Container) -> Child {
         .stdout(Stdio::null())
         .spawn()
         .expect("Spawning <docker run> command failed.")
-}
-
-fn run_shell_script(shell: &Shell) -> Child {
-    println!("Starting to run shell script");
-    if let Some(environment_variables) = &shell.env {
-        set_environment_variables(environment_variables)
-            .wait()
-            .expect("Something went wrong setting up environment variables");
-    }
-    Command::new("sh")
-        .arg("-c")
-        .arg(shell.commands.join(" && "))
-        .spawn()
-        .expect("Spawning <script> command failed.")
-}
-
-/// Creates a Command list from the given list of (ExecutionEnvironment, Vec<String>)
-/// tuples.
-///
-/// It uses the first element of the Vec as the <command>, the rest is evaluated
-/// as <args>.
-///
-/// Depending on the given ExecutionEnvironment, it can modify the <command> to
-/// be run in the given container.
-///
-/// ---
-/// Panics if the given Vec<String> is empty.
-// fn create_commands_from_tokens<'a>(
-//     env_and_tokens: &Vec<(ExecutionEnvironment, String)>,
-// ) -> Vec<Command> {
-//     env_and_tokens
-//         .iter()
-//         .map(|e_ts| {
-//             if !e_ts.1.is_empty() {
-//                 match &e_ts.0 {
-//                     ExecutionEnvironment::Local => {
-//                         let mut cmd = Command::new(&e_ts.1[0]);
-//                         e_ts.1[1..].iter().for_each(|token| {
-//                             cmd.arg(token);
-//                         });
-//                         return cmd;
-//                     }
-//                     ExecutionEnvironment::Container(_container_identification) => {
-//                         todo!("Implement command execution in Container")
-//                     }
-//                 }
-//             } else {
-//                 panic!("Empty command tokens array is not allowed.")
-//             }
-//         })
-//         .collect()
-// }
-
-/// Sets the given (String, String) tuples as environment variables inside the
-/// **execution** environment.
-///
-/// First element gets used as KEY. Second element gets used as VALUE.
-fn set_environment_variables(key_values: &Vec<(String, String)>) -> Child {
-    key_values.iter().for_each(|p| {
-        std::env::set_var(&p.0, &p.1);
-    });
-    Command::new("sh")
-        .arg("-c")
-        .arg("echo \"Environment variables are set\"")
-        .stdout(Stdio::null())
-        .spawn()
-        .expect("Spawning set_environment_variables success message command failed.")
 }
