@@ -8,15 +8,15 @@ blueprints:
                 - "--rm"
             pre:
                 - [Local, "cargo sqlx prepare --check"]
-        container:
-            name: last-api
-            image: itwasneo/last-api:latest
-            ports: ["8081", "8081"]
-            env: 
-                - ["API_HOST", "0.0.0.0"]
-                - ["API_PORT", "8081"]
-                - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
-                - ["DB_POOL_MAX_CONNECTIONS", "20"]
+        # container:
+        #     name: last-api
+        #     image: itwasneo/last-api:latest
+        #     ports: ["8081", "8081"]
+        #     env: 
+        #         - ["API_HOST", "0.0.0.0"]
+        #         - ["API_PORT", "8081"]
+        #         - ["DATABASE_URL", "postgres://postgres:password@postgres:5432/last"]
+        #         - ["DB_POOL_MAX_CONNECTIONS", "20"]
 
     # last-crawler
     crawler:
@@ -74,11 +74,11 @@ flows:
       tasks:
         - { id: 0, type: Blueprint, name: db, job: container }
         # - { id: 1, type: Blueprint, name: test, job: shell, depends: 0 }
-        - { id: 1, type: Env, name: dev, job: set, depends: 0 }
-        - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
-        - { id: 3, type: Blueprint, name: api, job: container, depends: 2 }
-        - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }
-        - { id: 5, type: Blueprint, name: crawler, job: container, depends: 4 }
+        # - { id: 1, type: Env, name: dev, job: set, depends: 0 }
+        # - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
+        - { id: 3, type: Blueprint, name: api, job: container, depends: 0 }
+        # - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }
+        - { id: 5, type: Blueprint, name: crawler, job: container, depends: 0 }
       pkg_dependencies: ["psql", "sqlx"]
         
 env:

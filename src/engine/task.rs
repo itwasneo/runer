@@ -20,7 +20,6 @@ pub async fn run_task(
     blueprints: Arc<HashMap<String, Blueprint>>,
     env: Arc<HashMap<String, Vec<(String, String)>>>,
 ) {
-    // TODO: Implement waiting for parent process
     if let Some(depends) = task.depends {
         wait_until_parent_task_command_is_finished(depends, task.id, handles.clone()).await;
     }
