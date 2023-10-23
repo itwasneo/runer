@@ -1,15 +1,10 @@
-//use std::process::{Command, Stdio};
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
-
 use anyhow::{anyhow, Result};
-use log::{error, info};
+use log::info;
+use smol::channel;
 use smol::process::{Child, Command, Stdio};
 
-use crate::model::runer::Shell;
-use crate::run_task;
-
 use super::state::State;
+use super::task::run_task;
 
 pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
     if let Some(flows) = state.flows {
@@ -18,40 +13,43 @@ pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
                 check_package_dependencies(&pkg_dependencies).await?;
             }
 
-            let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
+            let (tx, rx) = channel::bounded::<Option<(u32, Child)>>(flow.tasks.len());
 
             if !flow.tasks.is_empty() {
-                flow.tasks.iter().for_each(|task| {
+                for task in &flow.tasks {
                     let task = task.clone();
                     let handles = state.handles.as_ref().unwrap().clone();
                     let blueprints = state.blueprints.as_ref().unwrap().clone();
                     let env = state.env.as_ref().unwrap().clone();
-                    if let Some(_) = task.depends {
-                        let thread_handler = thread::spawn(move || {
-                            run_task(task, handles, blueprints, env);
-                        });
-                        thread_handlers.push(thread_handler);
-                    } else {
-                        run_task(task, handles, blueprints, env);
+                    let tx = tx.clone();
+                    // run_task(tx, task, handles, blueprints, env).await;
+                    smol::spawn(run_task(tx, task, handles, blueprints, env)).detach();
+                }
+
+                for _ in 0..flow.tasks.len() {
+                    match rx.recv().await {
+                        Ok(p) => {
+                            if let Some((task_id, handle)) = p {
+                                let mut handles = state.handles.as_ref().unwrap().lock().await;
+                                handles.insert(task_id, handle);
+                            }
+                        }
+                        Err(_) => return Err(anyhow!("CHANNEL ERROR")),
+                    }
+                }
+
+                // Making sure every command exited gracefully
+                let mut handles = state.handles.as_ref().unwrap().lock().await;
+                handles.iter_mut().for_each(|p| {
+                    // TODO: Change this to try_wait and handle results separately
+                    match p.1.try_status() {
+                        Ok(Some(status)) => info!("Task {} exited with: {status}", p.0),
+                        Ok(None) => {
+                            let _ = p.1.status();
+                        }
+                        Err(e) => panic!("error attempting to wait: {e}"),
                     }
                 });
-
-                for h in thread_handlers {
-                    h.join().unwrap();
-                }
-                // Making sure every command exited gracefully
-                if let Ok(mut handles) = state.handles.as_ref().unwrap().lock() {
-                    handles.iter_mut().for_each(|p| {
-                        // TODO: Change this to try_wait and handle results separately
-                        match p.1.try_wait() {
-                            Ok(Some(status)) => info!("Task {} exited with: {status}", p.0),
-                            Ok(None) => {
-                                let _ = p.1.wait();
-                            }
-                            Err(e) => panic!("error attempting to wait: {e}"),
-                        }
-                    });
-                }
             } else {
                 return Err(anyhow!("Flow should have at least one task."));
             }
@@ -72,7 +70,7 @@ pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
 /// Panics if it finds an uninstalled package.
 pub async fn check_package_dependencies(deps: &Vec<String>) -> Result<()> {
     info!("Checking package dependencies");
-    let (tx, rx) = std::sync::mpsc::channel::<Child>();
+    let (tx, rx) = channel::unbounded::<Child>();
     for d in deps {
         let d = d.clone();
         tx.send(
@@ -82,10 +80,10 @@ pub async fn check_package_dependencies(deps: &Vec<String>) -> Result<()> {
                 .stdout(Stdio::null())
                 .spawn()?,
         )
-        .unwrap();
+        .await?;
     }
     for _ in deps {
-        match rx.recv() {
+        match rx.recv().await {
             Ok(mut child) => {
                 if !child.status().await?.success() {
                     return Err(anyhow!("Missing dependency"));
@@ -95,27 +93,4 @@ pub async fn check_package_dependencies(deps: &Vec<String>) -> Result<()> {
         }
     }
     Ok(())
-}
-
-// TODO: Instead of setting environment_variables with private function
-// use .env method of Command struct.
-pub fn run_shell_script(shell: &Shell) -> Result<Child, std::io::Error> {
-    info!("Starting to run shell script");
-    if let Some(environment_variables) = &shell.env {
-        set_environment_variables(environment_variables);
-    }
-    Command::new("sh")
-        .arg("-c")
-        .arg(shell.commands.join(" && "))
-        .spawn()
-}
-
-/// Sets the given (String, String) tuples as environment variables inside the
-/// **execution** environment.
-///
-/// First element gets used as KEY. Second element gets used as VALUE.
-pub fn set_environment_variables(key_values: &Vec<(String, String)>) {
-    key_values.iter().for_each(|p| {
-        std::env::set_var(&p.0, &p.1);
-    });
 }
