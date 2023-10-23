@@ -97,6 +97,12 @@ pub fn run_docker_container(docker_container: &Container) -> Result<Child, std::
         })
     }
 
+    if let Some(options) = &docker_container.options {
+        options.iter().for_each(|o| {
+            docker_run_command.arg(o);
+        })
+    }
+
     if let Some(entrypoint) = &docker_container.entrypoint {
         if !entrypoint.is_empty() {
             docker_run_command.args(["--entrypoint", &entrypoint[0]]);
@@ -114,7 +120,7 @@ pub fn run_docker_container(docker_container: &Container) -> Result<Child, std::
                 ExecutionEnvironment::Local => {
                     todo!("Implement command execution in Container")
                 }
-                ExecutionEnvironment::Container(_container_identification) => {
+                ExecutionEnvironment::Container => {
                     docker_run_command.args(["--health-cmd", &hc.command.1]);
                 }
             }

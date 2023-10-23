@@ -6,6 +6,8 @@ use smol::process::{Child, Command, Stdio};
 use super::state::State;
 use super::task::run_task;
 
+/// Executes a single Flow residing in the Application State.
+/// Right now it takes an index and with it, it checks the Vec<Flow>.
 pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
     if let Some(flows) = state.flows {
         if let Some(flow) = flows.get(flow_idx) {

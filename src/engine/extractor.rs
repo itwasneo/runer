@@ -10,9 +10,10 @@ use log::info;
 /// * Returns error if it can't deserialize the given file into a valid
 /// Rune struct.
 ///
-/// IMPORTANT: .runer files are basically files written in valid yaml
+/// MENTAL NOTE: .runer files are basically files written in valid yaml
 /// format. That's why funtion currently uses yaml formatter of config
-/// crate.
+/// crate. It would be a good idea to implement a .runer specific validation
+/// on top of that.
 pub fn extract_rune(file: &str) -> Result<Rune> {
     if !file.ends_with(".runer") {
         return Err(anyhow!("Not a .runer file"));

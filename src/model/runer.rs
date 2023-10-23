@@ -1,7 +1,14 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// This is the main struct that a .runer file is deserialized into.
+/// Throughout the application, whenever Fragment keyword is used, it
+/// refers to the fields of this struct.
+///
+/// At the current state, a Rune can have 3 fragments. And there could be
+/// only 1 instance of each.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rune {
     pub blueprints: Option<HashMap<String, Blueprint>>,
     pub env: Option<HashMap<String, Vec<(String, String)>>>,
@@ -9,6 +16,7 @@ pub struct Rune {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Image {
     pub context: String,
     pub tag: String,
@@ -19,16 +27,17 @@ pub struct Image {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
 pub enum ExecutionEnvironment {
     Local,
-    Container(String),
+    Container,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Container {
     pub name: String,
     pub image: String,
+    pub options: Option<Vec<String>>,
     pub ports: Option<(String, String)>,
     pub env: Option<Vec<(String, String)>>,
     pub volumes: Option<Vec<(String, String)>>,
@@ -37,6 +46,7 @@ pub struct Container {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HealthCheck {
     pub command: (ExecutionEnvironment, String),
     pub interval: Option<String>,
@@ -44,12 +54,14 @@ pub struct HealthCheck {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Shell {
     pub commands: Vec<String>,
     pub env: Option<Vec<(String, String)>>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Blueprint {
     pub _env: Option<Vec<(String, String)>>,
     pub image: Option<Image>,
@@ -58,6 +70,7 @@ pub struct Blueprint {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Flow {
     pub name: String,
     pub tasks: Vec<Task>,
@@ -65,6 +78,7 @@ pub struct Flow {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: u32,
     #[serde(rename = "type")]

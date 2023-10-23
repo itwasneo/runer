@@ -36,7 +36,7 @@ impl Default for State {
 
 impl State {
     /// This function builds the Application State, according to the given
-    /// Rune's fragments.
+    /// Rune's Fragments.
     pub fn from_rune(mut self, rune: Rune) -> Self {
         if let Some(blueprints) = rune.blueprints {
             self.blueprints = Some(Arc::new(blueprints));
