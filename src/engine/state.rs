@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use std::process::Child;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use smol::lock::Mutex;
+use smol::process::Child;
 
 use crate::model::runer::{Blueprint, Flow, Rune};
 
