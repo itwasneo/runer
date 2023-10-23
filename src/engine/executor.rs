@@ -40,16 +40,16 @@ pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
 
                 // Making sure every command exited gracefully
                 let mut handles = state.handles.as_ref().unwrap().lock().await;
-                handles.iter_mut().for_each(|p| {
-                    // TODO: Change this to try_wait and handle results separately
+                for p in handles.iter_mut() {
                     match p.1.try_status() {
                         Ok(Some(status)) => info!("Task {} exited with: {status}", p.0),
-                        Ok(None) => {
-                            let _ = p.1.status();
-                        }
+                        Ok(None) => match p.1.status().await {
+                            Ok(status) => info!("Task {} exited with: {status}", p.0),
+                            Err(e) => panic!("Task {} exited with error: {e}", p.0),
+                        },
                         Err(e) => panic!("error attempting to wait: {e}"),
                     }
-                });
+                }
             } else {
                 return Err(anyhow!("Flow should have at least one task."));
             }
