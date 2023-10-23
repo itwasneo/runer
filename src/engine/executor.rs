@@ -1,18 +1,21 @@
-use std::process::{Command, Stdio};
+//use std::process::{Command, Stdio};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use log::info;
+use log::{error, info};
+use smol::process::{Child, Command, Stdio};
 
+use crate::model::runer::Shell;
 use crate::run_task;
 
 use super::state::State;
 
-pub fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
+pub async fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
     if let Some(flows) = state.flows {
         if let Some(flow) = flows.get(flow_idx) {
             if let Some(pkg_dependencies) = &flow.pkg_dependencies {
-                check_package_dependencies(&pkg_dependencies);
+                check_package_dependencies(&pkg_dependencies).await?;
             }
 
             let mut thread_handlers: Vec<JoinHandle<()>> = vec![];
@@ -67,17 +70,52 @@ pub fn execute_flow(flow_idx: usize, state: State) -> Result<()> {
 ///
 /// ---
 /// Panics if it finds an uninstalled package.
-fn check_package_dependencies(deps: &Vec<String>) {
-    println!("Checking package dependencies");
-    deps.iter().for_each(|d| {
-        let d_exists = Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {}", d))
-            .stdout(Stdio::null())
-            .output()
-            .expect("Failed to execute <command>");
-        if !d_exists.status.success() {
-            panic!("{} is not installed", d);
+pub async fn check_package_dependencies(deps: &Vec<String>) -> Result<()> {
+    info!("Checking package dependencies");
+    let (tx, rx) = std::sync::mpsc::channel::<Child>();
+    for d in deps {
+        let d = d.clone();
+        tx.send(
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("command -v {}", d))
+                .stdout(Stdio::null())
+                .spawn()?,
+        )
+        .unwrap();
+    }
+    for _ in deps {
+        match rx.recv() {
+            Ok(mut child) => {
+                if !child.status().await?.success() {
+                    return Err(anyhow!("Missing dependency"));
+                }
+            }
+            Err(_) => return Err(anyhow!("CHANNEL ERROR")),
         }
+    }
+    Ok(())
+}
+
+// TODO: Instead of setting environment_variables with private function
+// use .env method of Command struct.
+pub fn run_shell_script(shell: &Shell) -> Result<Child, std::io::Error> {
+    info!("Starting to run shell script");
+    if let Some(environment_variables) = &shell.env {
+        set_environment_variables(environment_variables);
+    }
+    Command::new("sh")
+        .arg("-c")
+        .arg(shell.commands.join(" && "))
+        .spawn()
+}
+
+/// Sets the given (String, String) tuples as environment variables inside the
+/// **execution** environment.
+///
+/// First element gets used as KEY. Second element gets used as VALUE.
+pub fn set_environment_variables(key_values: &Vec<(String, String)>) {
+    key_values.iter().for_each(|p| {
+        std::env::set_var(&p.0, &p.1);
     });
 }
