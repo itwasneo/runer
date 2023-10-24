@@ -21,6 +21,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 config = { version = "0.13", features = ["yaml"] }
 env_logger = "0.10"
+gtk4 = "0.7"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
