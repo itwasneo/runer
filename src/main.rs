@@ -5,7 +5,10 @@ mod model;
 use clap::Parser;
 use engine::extractor::*;
 use glib::clone;
-use gtk::{glib, Application, ApplicationWindow, Box};
+use gtk::{
+    glib, Application, ApplicationWindow, Box, Entry, ScrolledWindow, Separator, TextBuffer,
+    TextView,
+};
 use gtk::{prelude::*, Button};
 use gtk4 as gtk;
 use log::{error, info};
@@ -63,8 +66,13 @@ fn build_ui(application: &Application) {
     let window = ApplicationWindow::builder()
         .application(application)
         .title("runer")
-        .default_height(150)
-        .default_width(200)
+        .default_height(600)
+        .default_width(800)
+        .build();
+
+    let scrolled_window = ScrolledWindow::builder()
+        .width_request(700)
+        .height_request(700)
         .build();
 
     let button_increase = Button::builder()
@@ -89,6 +97,18 @@ fn build_ui(application: &Application) {
     my_button.set_margin_start(12);
     my_button.set_margin_end(12);
 
+    let buff = TextBuffer::new(None);
+    buff.set_text("This is a text view.\nThis is a text view.");
+    let tv = TextView::builder()
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .buffer(&buff)
+        .build();
+
+    scrolled_window.set_child(Some(&tv));
+
     // Reference-countet object with inner-mutability
     let number = Rc::new(Cell::new(0));
 
@@ -101,8 +121,9 @@ fn build_ui(application: &Application) {
         button_increase.set_label(&number.get().to_string());
     }));
 
-    my_button.connect_clicked(clone!(@strong window => move |_| {
-        window.set_title(Some("Custom Button Clicked"));
+    my_button.connect_clicked(clone!(@strong buff => move |_| {
+        let mut end_iter = buff.end_iter();
+        buff.insert(&mut end_iter, "\nNew Message");
     }));
 
     let gtk_box = Box::builder()
@@ -111,7 +132,10 @@ fn build_ui(application: &Application) {
 
     gtk_box.append(&button_increase);
     gtk_box.append(&button_decrease);
+    gtk_box.append(&Separator::new(gtk::Orientation::Vertical));
     gtk_box.append(&my_button);
+    gtk_box.append(&Separator::new(gtk::Orientation::Vertical));
+    gtk_box.append(&scrolled_window);
 
     window.set_child(Some(&gtk_box));
 
