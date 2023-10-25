@@ -1,72 +1,17 @@
 mod custom_button;
-mod engine;
-mod model;
 
-use clap::Parser;
-use engine::extractor::*;
 use glib::clone;
-use gtk::glib::ExitCode;
 use gtk::{
     glib, Application, ApplicationWindow, Box, ScrolledWindow, Separator, TextBuffer, TextView,
 };
 use gtk::{prelude::*, Button};
 use gtk4 as gtk;
-use log::{error, info};
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Instant;
 
 use crate::custom_button::CustomButton;
-use crate::engine::executor::execute_flow;
-use crate::engine::state::State;
-use crate::model::commandline::*;
 
-pub fn run() -> ExitCode {
-    let start = Instant::now();
-    // Parsing Command Line Arguments. Here the application directly exits
-    // if it can't parse the arguments properly.
-    let args = Cli::parse();
-
-    // Initializing Logger
-    env_logger::init();
-
-    match args.mode {
-        Mode::Run(args) => {
-            let rune = extract_rune(&args.file.unwrap_or_else(|| ".runer".to_owned()))
-                .map_err(|e| error!("{e}"))
-                .unwrap();
-
-            analyze_fragments(&rune);
-
-            let state = State::default().from_rune(rune);
-
-            smol::block_on(execute_flow(0, state))
-                .map_err(|e| error!("{e}"))
-                .unwrap();
-            let duration = start.elapsed();
-            info!("Time elapsed: {:?}", duration);
-            ExitCode::SUCCESS
-        }
-        Mode::Cli => {
-            info!("Mode is C which stands for CLI. <Not Implemented>");
-            let duration = start.elapsed();
-            info!("Time elapsed: {:?}", duration);
-            ExitCode::FAILURE
-        }
-        Mode::Desktop => {
-            let application = Application::builder()
-                .application_id("com.itwasneo.runer")
-                .build();
-
-            application.connect_activate(build_ui);
-            let duration = start.elapsed();
-            info!("Time elapsed: {:?}", duration);
-            application.run_with_args(&[""])
-        }
-    }
-}
-
-fn build_ui(application: &Application) {
+pub fn build_ui(application: &Application) {
     let window = ApplicationWindow::builder()
         .application(application)
         .title("runer")
