@@ -7,6 +7,13 @@ edition = "2021"
 author = "itwasneo <https://github.com/itwasneo>"
 about = "Keep Calm and Automatize Everything"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "runer"
+
 [profile.release]
 lto = true
 opt-level = 'z'
