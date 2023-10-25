@@ -72,14 +72,14 @@ blueprints:
 flows:
     - name: local_dev_docker_setup
       tasks:
-        - { id: 0, type: Blueprint, name: db, job: container }
+        # - { id: 0, type: Blueprint, name: db, job: container }
         # - { id: 1, type: Blueprint, name: test, job: shell, depends: 0 }
-        # - { id: 1, type: Env, name: dev, job: set }
+        - { id: 1, type: Env, name: dev, job: set }
         # - { id: 2, type: Blueprint, name: api, job: image, depends: 1 }
         # - { id: 3, type: Blueprint, name: api, job: container, depends: 0 }
         # - { id: 4, type: Blueprint, name: crawler, job: image, depends: 1 }
         # - { id: 5, type: Blueprint, name: crawler, job: container, depends: 0 }
-      pkg_dependencies: ["psql", "sqlx"]
+      # pkg_dependencies: ["psql", "sqlx"]
         
 env:
     dev:
