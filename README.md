@@ -34,7 +34,7 @@ of the functionality that **I** need from a CLI tool like _docker-compose_.
 # Goals
 
 1. Convert it to a proper _cargo_ tool. Not only a CLI tool, but also a desktop
-app maybe. I really want to work with _Tauri_.
+app maybe. I decided to go on with Gtk4, don't judge me.
 2. Make it as engine and environment agnostic as possible. Right now it is
 heavily depends on _docker_.
 
