@@ -6,9 +6,10 @@ use runer::build_ui;
 
 use crate::engine::extractor::*;
 use crate::model::commandline::{Cli, Mode};
+use gdk4::Display;
 use gtk::glib::ExitCode;
-use gtk::prelude::*;
 use gtk::Application;
+use gtk::{prelude::*, CssProvider};
 use gtk4 as gtk;
 
 use crate::engine::executor::execute_flow;
@@ -50,9 +51,23 @@ pub fn handle_mod(mode: Mode) -> ExitCode {
                 .application_id("com.itwasneo.runer")
                 .build();
 
+            application.connect_startup(|_| load_css());
             application.connect_activate(build_ui);
             info!("Application creation took {:?}", start.elapsed());
             application.run_with_args(&[] as &[&str])
         }
     }
+}
+
+fn load_css() {
+    // Load the CSS file and add it to the provider
+    let provider = CssProvider::new();
+    provider.load_from_data(include_str!("style.css"));
+
+    // Add the provider to the default screen
+    gtk::style_context_add_provider_for_display(
+        &Display::default().expect("Could not connect to a display."),
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }

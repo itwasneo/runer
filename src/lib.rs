@@ -1,15 +1,6 @@
-mod custom_button;
-
-use glib::clone;
-use gtk::{
-    glib, Application, ApplicationWindow, Box, ScrolledWindow, Separator, TextBuffer, TextView,
-};
-use gtk::{prelude::*, Button};
+use gtk::{prelude::*, HeaderBar, Label, Notebook, ScrolledWindow, TextBuffer, TextView, Widget};
+use gtk::{Application, ApplicationWindow, Box};
 use gtk4 as gtk;
-use std::cell::Cell;
-use std::rc::Rc;
-
-use crate::custom_button::CustomButton;
 
 pub fn build_ui(application: &Application) {
     let window = ApplicationWindow::builder()
@@ -17,77 +8,62 @@ pub fn build_ui(application: &Application) {
         .title("runer")
         .default_height(600)
         .default_width(800)
+        // .decorated(false)
+        .show_menubar(true)
         .build();
 
-    let scrolled_window = ScrolledWindow::builder()
-        .width_request(700)
-        .height_request(700)
-        .build();
-
-    let button_increase = Button::builder()
-        .label("Increase")
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-
-    let button_decrease = Button::builder()
-        .label("Decrease")
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-
-    let my_button = CustomButton::with_label("Press me!");
-    my_button.set_margin_top(12);
-    my_button.set_margin_bottom(12);
-    my_button.set_margin_start(12);
-    my_button.set_margin_end(12);
-
-    let buff = TextBuffer::new(None);
-    buff.set_text("This is a text view.\nThis is a text view.");
-    let tv = TextView::builder()
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .buffer(&buff)
-        .build();
-
-    scrolled_window.set_child(Some(&tv));
-
-    // Reference-countet object with inner-mutability
-    let number = Rc::new(Cell::new(0));
-
-    button_increase.connect_clicked(clone!(@weak number, @strong button_decrease => move |_| {
-        number.set(number.get() + 1);
-        button_decrease.set_label(&number.get().to_string());
-    }));
-    button_decrease.connect_clicked(clone!(@strong button_increase => move |_| {
-        number.set(number.get() - 1);
-        button_increase.set_label(&number.get().to_string());
-    }));
-
-    my_button.connect_clicked(clone!(@strong buff => move |_| {
-        let mut end_iter = buff.end_iter();
-        buff.insert(&mut end_iter, "\nNew Message");
-    }));
+    let header = HeaderBar::builder().build();
+    window.set_titlebar(Some(&header));
 
     let gtk_box = Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .build();
 
-    gtk_box.append(&button_increase);
-    gtk_box.append(&button_decrease);
-    gtk_box.append(&Separator::new(gtk::Orientation::Vertical));
-    gtk_box.append(&my_button);
-    gtk_box.append(&Separator::new(gtk::Orientation::Vertical));
-    gtk_box.append(&scrolled_window);
+    let gtk_notebook = Notebook::builder()
+        .tab_pos(gtk::PositionType::Bottom)
+        .show_border(false)
+        .build();
+
+    let console = create_console();
+
+    create_tab(&gtk_notebook, "Logs", &console);
+    create_tab(&gtk_notebook, "tab_2", &Label::new(Some("tab_2_content")));
+    create_tab(&gtk_notebook, "tab_3", &Label::new(Some("tab_3_content")));
+
+    gtk_box.append(&gtk_notebook);
 
     window.set_child(Some(&gtk_box));
 
-    // Presents the window to the user.
     window.present();
+}
+
+fn create_tab(notebook: &Notebook, label: &str, content: &impl IsA<Widget>) {
+    notebook.append_page(content, Some(&Label::new(Some(label))));
+}
+
+fn create_console() -> ScrolledWindow {
+    let scrollable = ScrolledWindow::builder()
+        .hexpand(true)
+        .vexpand(true)
+        .build();
+
+    let text_buffer = TextBuffer::builder()
+        .text("Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.")
+        .build();
+
+    let text_view = TextView::builder()
+        .editable(false)
+        .wrap_mode(gtk::WrapMode::Word)
+        .pixels_below_lines(10)
+        .buffer(&text_buffer)
+        .margin_start(5)
+        .margin_end(5)
+        .hexpand(true)
+        .vexpand(true)
+        .css_classes(vec!["console"])
+        .build();
+
+    scrollable.set_child(Some(&text_view));
+
+    scrollable
 }

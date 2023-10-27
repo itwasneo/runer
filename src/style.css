@@ -1,0 +1,45 @@
+@define-color bg-1 hsl(0, 0%, 3%);
+@define-color bg-2 hsl(0, 0%, 10%);
+
+.console {
+    padding: 5px;
+    background-color: @bg-2;
+}
+
+notebook {
+    border-bottom-left-radius: 5px;
+    background-color: @bg-1;
+}
+
+notebook > header.bottom tab:checked {
+    box-shadow: none;
+    border: 1px;
+}
+
+window {
+    border-radius: 10px;
+}
+
+window.background {
+    background: none;
+}
+
+scrolledwindow {
+    background-color: @bg-1;
+}
+
+headerbar {
+    min-height: 0px;
+    padding-left: 2px;
+    padding-right: 2px;
+    background-color: @bg-1;
+}
+
+headerbar entry,
+headerbar spinbutton,
+headerbar button,
+headerbar separator {
+    margin-top: 0px; /* same as headerbar side padding for nicer proportions */
+    margin-bottom: 0px;
+    padding: 1px;
+}
