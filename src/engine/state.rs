@@ -5,7 +5,6 @@ use smol::lock::Mutex;
 use smol::process::Child;
 
 use crate::model::runer::{Blueprint, Flow, Rune};
-use serde::Serialize;
 
 /// It represents the Application State throughout the Application
 /// lifetime. It consists fields that should be available to Application
@@ -50,15 +49,5 @@ impl State {
             self.handles = Some(Arc::new(Mutex::new(HashMap::<u32, Child>::new())));
         }
         self
-    }
-
-    pub fn serialize_blueprints(self) -> String {
-        let mut result: Vec<String> = vec![];
-        if let Some(blueprints) = self.blueprints {
-            for p in blueprints.iter() {
-                result.push(p.0.to_owned());
-            }
-        }
-        result.join("\n")
     }
 }
