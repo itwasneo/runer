@@ -7,7 +7,7 @@ pub struct Cli {
     pub mode: Mode,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, PartialEq, Eq, Clone)]
 pub enum Mode {
     /// (alias <r>) Runs the given .runer file or the .runer files in the current directory
     #[command(alias = "r")]
@@ -22,7 +22,7 @@ pub enum Mode {
     Desktop,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, PartialEq, Eq, Clone)]
 pub struct RunArgs {
     /// .runer file to run
     #[arg(short, long)]

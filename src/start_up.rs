@@ -19,8 +19,10 @@ pub fn parse_cmdline_args() -> Cli {
     Cli::parse()
 }
 
-pub fn initialize_logger() {
-    env_logger::init();
+pub fn initialize_logger(mode: Mode) {
+    if mode != Mode::Desktop {
+        env_logger::init();
+    }
 }
 
 pub fn handle_mod(mode: Mode) -> ExitCode {

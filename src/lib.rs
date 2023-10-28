@@ -1,6 +1,11 @@
+mod desktop;
+
+use desktop::logger::init;
+use gdk4::glib::{ControlFlow, Priority};
 use gtk::{prelude::*, HeaderBar, Label, Notebook, ScrolledWindow, TextBuffer, TextView, Widget};
 use gtk::{Application, ApplicationWindow, Box};
 use gtk4 as gtk;
+use log::{error, info};
 
 pub fn build_ui(application: &Application) {
     let window = ApplicationWindow::builder()
@@ -47,9 +52,18 @@ fn create_console() -> ScrolledWindow {
         .vexpand(true)
         .build();
 
-    let text_buffer = TextBuffer::builder()
-        .text("Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.")
-        .build();
+    let text_buffer = TextBuffer::new(None);
+    let buffer = text_buffer.clone();
+
+    let (tx, rx) = gtk::glib::MainContext::channel::<String>(Priority::DEFAULT);
+
+    init(tx.clone()).unwrap_or_else(|_| error!("Application logger couldn't get initialized"));
+    rx.attach(None, move |msg| {
+        buffer.insert_at_cursor(&msg);
+        ControlFlow::Continue
+    });
+
+    info!("Life is beautiful");
 
     let text_view = TextView::builder()
         .editable(false)
