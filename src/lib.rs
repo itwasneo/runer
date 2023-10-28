@@ -60,15 +60,15 @@ fn create_console() -> ScrolledWindow {
     init(tx.clone()).unwrap_or_else(|_| error!("Application logger couldn't get initialized"));
     rx.attach(None, move |msg| {
         buffer.insert_at_cursor(&msg);
+        buffer.insert_at_cursor("\n");
         ControlFlow::Continue
     });
 
-    info!("Life is beautiful");
+    info!("Logger is indeed attached.");
 
     let text_view = TextView::builder()
         .editable(false)
         .wrap_mode(gtk::WrapMode::Word)
-        .pixels_below_lines(10)
         .buffer(&text_buffer)
         .margin_start(5)
         .margin_end(5)
