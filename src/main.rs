@@ -1,3 +1,4 @@
+mod desktop;
 mod engine;
 mod model;
 mod start_up;

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 ///
 /// At the current state, a Rune can have 3 fragments. And there could be
 /// only 1 instance of each.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Rune {
     pub blueprints: Option<HashMap<String, Blueprint>>,
@@ -15,7 +15,7 @@ pub struct Rune {
     pub flows: Option<Vec<Flow>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Image {
     pub context: String,
@@ -26,13 +26,13 @@ pub struct Image {
     pub post: Option<Vec<(ExecutionEnvironment, String)>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub enum ExecutionEnvironment {
     Local,
     Container,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Container {
     pub name: String,
@@ -45,7 +45,7 @@ pub struct Container {
     pub hc: Option<HealthCheck>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HealthCheck {
     pub command: (ExecutionEnvironment, String),
@@ -53,14 +53,14 @@ pub struct HealthCheck {
     pub retries: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Shell {
     pub commands: Vec<String>,
     pub env: Option<Vec<(String, String)>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Blueprint {
     pub _env: Option<Vec<(String, String)>>,
@@ -69,7 +69,7 @@ pub struct Blueprint {
     pub shell: Option<Shell>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Flow {
     pub name: String,
@@ -77,7 +77,7 @@ pub struct Flow {
     pub pkg_dependencies: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: u32,
@@ -88,13 +88,13 @@ pub struct Task {
     pub depends: Option<u32>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub enum TaskType {
     Blueprint,
     Env,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum JobType {
     Container,

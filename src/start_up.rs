@@ -1,8 +1,8 @@
 use std::time::Instant;
 
+use crate::desktop::build::build_ui;
 use clap::Parser;
 use log::{error, info};
-use runer::build_ui;
 
 use crate::engine::extractor::*;
 use crate::model::commandline::{Cli, Mode};
@@ -49,12 +49,22 @@ pub fn handle_mod(mode: Mode) -> ExitCode {
         }
         Mode::Desktop => {
             let start = Instant::now();
+
+            // TODO: By default program needs a .runer file exist in the
+            // current directory. This behavior should change once the file
+            // picker is added.
+            // let rune = extract_rune(".runer").map_err(|e| error!("{e}")).unwrap();
+
             let application = Application::builder()
                 .application_id("com.itwasneo.runer")
                 .build();
 
+            // Handling styling / loading CSS
             application.connect_startup(|_| load_css());
+
+            // Care sending a Rune instance
             application.connect_activate(build_ui);
+
             info!("Application creation took {:?}", start.elapsed());
             application.run_with_args(&[] as &[&str])
         }
