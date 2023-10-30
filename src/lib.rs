@@ -1,11 +1,12 @@
 mod desktop;
 
-use desktop::logger::init;
-use gdk4::glib::{ControlFlow, Priority};
-use gtk::{prelude::*, HeaderBar, Label, Notebook, ScrolledWindow, TextBuffer, TextView, Widget};
+use gdk4::cairo::Antialias;
+use gtk::{prelude::*, DrawingArea, HeaderBar, Label, Notebook, Widget};
 use gtk::{Application, ApplicationWindow, Box};
 use gtk4 as gtk;
-use log::{error, info};
+// use log::{error, info};
+
+use self::desktop::console::create_console;
 
 pub fn build_ui(application: &Application) {
     let window = ApplicationWindow::builder()
@@ -13,7 +14,6 @@ pub fn build_ui(application: &Application) {
         .title("runer")
         .default_height(600)
         .default_width(800)
-        // .decorated(false)
         .show_menubar(true)
         .build();
 
@@ -31,8 +31,11 @@ pub fn build_ui(application: &Application) {
 
     let console = create_console();
 
+    let da = DrawingArea::new();
+    da.set_draw_func(draw_axis);
+
     create_tab(&gtk_notebook, "Logs", &console);
-    create_tab(&gtk_notebook, "tab_2", &Label::new(Some("tab_2_content")));
+    create_tab(&gtk_notebook, "tab_2", &da);
     create_tab(&gtk_notebook, "tab_3", &Label::new(Some("tab_3_content")));
 
     gtk_box.append(&gtk_notebook);
@@ -46,38 +49,24 @@ fn create_tab(notebook: &Notebook, label: &str, content: &impl IsA<Widget>) {
     notebook.append_page(content, Some(&Label::new(Some(label))));
 }
 
-fn create_console() -> ScrolledWindow {
-    let scrollable = ScrolledWindow::builder()
-        .hexpand(true)
-        .vexpand(true)
-        .build();
+fn draw_axis(area: &DrawingArea, ctx: &gdk4::cairo::Context, _width: i32, _height: i32) {
+    let hc = (area.height() as f64) / 2.0;
+    let wc = (area.width() as f64) / 2.0;
+    ctx.set_source_rgb(0.10, 0.10, 0.10);
+    ctx.paint().unwrap();
+    ctx.set_source_rgb(1.0, 1.0, 1.0);
+    ctx.set_line_width(1.0);
+    ctx.move_to(0.0, hc);
+    ctx.line_to(area.width().into(), hc);
+    ctx.move_to(wc, 0.0);
+    ctx.line_to(wc, area.height().into());
+    ctx.stroke().unwrap();
 
-    let text_buffer = TextBuffer::new(None);
-    let buffer = text_buffer.clone();
+    ctx.move_to(wc + 10.0, 15.0);
+    ctx.set_font_size(15.0);
+    ctx.set_antialias(Antialias::Best);
+    ctx.show_text("sigma").unwrap();
 
-    let (tx, rx) = gtk::glib::MainContext::channel::<String>(Priority::DEFAULT);
-
-    init(tx.clone()).unwrap_or_else(|_| error!("Application logger couldn't get initialized"));
-    rx.attach(None, move |msg| {
-        buffer.insert_at_cursor(&msg);
-        buffer.insert_at_cursor("\n");
-        ControlFlow::Continue
-    });
-
-    info!("Logger is indeed attached.");
-
-    let text_view = TextView::builder()
-        .editable(false)
-        .wrap_mode(gtk::WrapMode::Word)
-        .buffer(&text_buffer)
-        .margin_start(5)
-        .margin_end(5)
-        .hexpand(true)
-        .vexpand(true)
-        .css_classes(vec!["console"])
-        .build();
-
-    scrollable.set_child(Some(&text_view));
-
-    scrollable
+    ctx.move_to(area.width() as f64 - 90.0, hc + 15.0);
+    ctx.show_text("moneyness").unwrap();
 }
